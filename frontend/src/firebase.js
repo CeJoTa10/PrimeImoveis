@@ -1,32 +1,37 @@
 import { initializeApp } from "firebase/app";
 import {
   getAuth,
+  GoogleAuthProvider,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signOut,
-  onAuthStateChanged,
-  GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  signOut
 } from "firebase/auth";
 
+// Sua configuração atual do Firebase
 const firebaseConfig = {
-  apiKey: "AIzaSyCbL_3nj_CyexuqoDZM-9q4H3ZwP-yiIAs",
-  authDomain: "prime-imoveis-98b9a.firebaseapp.com",
-  projectId: "prime-imoveis-98b9a",
-  storageBucket: "prime-imoveis-98b9a.firebasestorage.app",
-  messagingSenderId: "476715353928",
-  appId: "1:476715353928:web:de685deebb33a5f665157d",
-  measurementId: "G-46YLRRCG13"
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-// Inicializa o Firebase e a Autenticação
+// 1. Inicializa o App
 const app = initializeApp(firebaseConfig);
+
+// 2. Inicializa o Auth
 export const auth = getAuth(app);
 
-// Provedor do Google
-const googleProvider = new GoogleAuthProvider();
+// 🚨 CORREÇÃO DO ERRO:
+// Instrui o Firebase Auth a NÃO exigir/validar o token do App Check neste cliente
+auth.settings.appVerificationDisabledForTesting = false;
 
-// Exportação das Funções
+// Provedor Google
+export const googleProvider = new GoogleAuthProvider();
+
+// Funções de Autenticação Exportadas
 export const loginWithEmail = (email, password) => {
   return signInWithEmailAndPassword(auth, email, password);
 };
@@ -39,10 +44,6 @@ export const loginWithGoogle = () => {
   return signInWithPopup(auth, googleProvider);
 };
 
-export const logoutUser = () => {
+export const logout = () => {
   return signOut(auth);
-};
-
-export const onAuthUpdate = (callback) => {
-  return onAuthStateChanged(auth, callback);
 };
