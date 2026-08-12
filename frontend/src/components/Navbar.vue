@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue';
-import { useAuth } from '../store/auth.js';
+import { authState } from '../store/auth.js';
 import { Home, User, LogOut, Menu, X, PlusCircle } from 'lucide-vue-next';
 
 // Emite eventos para abrir o modal de autenticação ou cadastro de imóveis
