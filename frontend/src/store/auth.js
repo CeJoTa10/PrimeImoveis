@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import { auth } from '../firebase';
+import { auth, logoutUser } from '../firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 
 export const authState = reactive({
@@ -7,16 +7,15 @@ export const authState = reactive({
   loading: true
 });
 
-// Listener em tempo real do estado de login
 onAuthStateChanged(auth, (currentUser) => {
   authState.user = currentUser;
   authState.loading = false;
 });
 
-// Adicione esta função customizada para compatibilidade com a Navbar
+// Hook de auxílio para os componentes
 export const useAuth = () => {
   return {
     authState,
-    user: authState.user
+    logout: logoutUser
   };
 };

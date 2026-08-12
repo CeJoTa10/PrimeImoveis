@@ -1,20 +1,26 @@
 <script setup>
-import { ref } from 'vue';
-import { authState } from '../store/auth.js';
+import { ref, computed } from 'vue';
+import { useAuth } from '../store/auth.js';
 import { Home, User, LogOut, Menu, X, PlusCircle } from 'lucide-vue-next';
 
-// Emite eventos para abrir o modal de autenticação ou cadastro de imóveis
+// Define os eventos de clique que o componente pai (App.vue) irá escutar
 const emit = defineEmits(['open-auth', 'open-new-property']);
 
-const { user, logout } = useAuth();
+// Extrai a store de autenticação e função de logout
+const { authState, logout } = useAuth();
+
+// Garante o acesso seguro ao objeto user
+const user = computed(() => authState?.user || null);
+
+// Controle do menu mobile
 const mobileMenuOpen = ref(false);
 
 const handleLogout = async () => {
   try {
     await logout();
-    mobileMenuOpen.value = false;
-  } catch (err) {
-    console.error('Erro ao deslogar:', err);
+    alert('Sessão encerrada com sucesso!');
+  } catch (error) {
+    console.error('Erro ao deslogar:', error);
   }
 };
 </script>
@@ -52,12 +58,14 @@ const handleLogout = async () => {
 
             <div class="flex items-center gap-3 pl-4 border-l border-slate-200">
               <div class="flex flex-col text-right">
-                <span class="text-xs font-semibold text-slate-800 leading-none">{{ user.displayName }}</span>
+                <span class="text-xs font-semibold text-slate-800 leading-none">
+                  {{ user.displayName || 'Usuário' }}
+                </span>
                 <span class="text-[10px] text-slate-400 font-medium">{{ user.email }}</span>
               </div>
               <div class="w-9 h-9 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold border border-brand-200">
                 <img v-if="user.photoURL" :src="user.photoURL" alt="Avatar" class="w-full h-full rounded-full object-cover" />
-                <span v-else>{{ user.displayName[0].toUpperCase() }}</span>
+                <span v-else>{{ (user.displayName || user.email || 'U')[0].toUpperCase() }}</span>
               </div>
               <button 
                 @click="handleLogout" 
@@ -106,10 +114,10 @@ const handleLogout = async () => {
         <div v-if="user" class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold border border-brand-200">
             <img v-if="user.photoURL" :src="user.photoURL" alt="Avatar" class="w-full h-full rounded-full object-cover" />
-            <span v-else>{{ user.displayName[0].toUpperCase() }}</span>
+            <span v-else>{{ (user.displayName || user.email || 'U')[0].toUpperCase() }}</span>
           </div>
           <div>
-            <div class="text-sm font-semibold text-slate-800">{{ user.displayName }}</div>
+            <div class="text-sm font-semibold text-slate-800">{{ user.displayName || 'Usuário' }}</div>
             <div class="text-xs text-slate-500">{{ user.email }}</div>
           </div>
           <button 
