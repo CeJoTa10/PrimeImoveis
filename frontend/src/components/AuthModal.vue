@@ -1,6 +1,8 @@
 <script setup>
 import { ref, reactive, watch } from 'vue';
 import { useAuth } from '../store/auth.js';
+import { loginWithEmail, registerWithEmail, loginWithGoogle as googleLogin } from '../firebase.js';
+import { updateProfile } from 'firebase/auth';
 import { Mail, Lock, User, X, Loader2, AlertCircle } from 'lucide-vue-next';
 
 const props = defineProps({
@@ -11,11 +13,14 @@ const props = defineProps({
 });
 
 const emit = defineEmits(['close']);
-const { login, register, loginWithGoogle, error } = useAuth();
+
+// Pegamos apenas o estado reativo da Store (se tiver)
+const { authState } = useAuth();
 
 // Abas: 'login' ou 'register'
 const activeTab = ref('login');
 const isSubmitting = ref(false);
+const errorMessage = ref('');
 
 const formData = reactive({
   name: '',
@@ -23,27 +28,61 @@ const formData = reactive({
   password: ''
 });
 
-// Limpa o formulário quando o modal abre ou fecha
+// Limpa o formulário e erros quando o modal abre ou fecha
 watch(() => props.isOpen, (newVal) => {
   if (!newVal) {
     formData.name = '';
     formData.email = '';
     formData.password = '';
     activeTab.value = 'login';
+    errorMessage.value = '';
   }
 });
 
 const handleAuth = async () => {
   isSubmitting.value = true;
+  errorMessage.value = '';
+
   try {
     if (activeTab.value === 'login') {
-      await login(formData.email, formData.password);
+      // 1. Executa o Login por E-mail
+      await loginWithEmail(formData.email, formData.password);
     } else {
-      await register(formData.email, formData.password, formData.name);
+      // 2. Executa o Cadastro por E-mail
+      if (formData.password.length < 6) {
+        throw new Error('A senha deve conter no mínimo 6 caracteres.');
+      }
+
+      const userCredential = await registerWithEmail(formData.email, formData.password);
+
+      // Salva o Nome no perfil do usuário no Firebase
+      if (formData.name && userCredential.user) {
+        await updateProfile(userCredential.user, {
+          displayName: formData.name
+        });
+      }
     }
-    emit('close'); // Fecha o modal após sucesso
+
+    emit('close'); // Fecha o modal após o sucesso
   } catch (err) {
     console.error('Erro de autenticação:', err);
+
+    // Mapeamento de mensagens amigáveis de erro do Firebase
+    switch (err.code) {
+      case 'auth/email-already-in-use':
+        errorMessage.value = 'Este e-mail já está cadastrado.';
+        break;
+      case 'auth/invalid-credential':
+      case 'auth/wrong-password':
+      case 'auth/user-not-found':
+        errorMessage.value = 'E-mail ou senha incorretos.';
+        break;
+      case 'auth/weak-password':
+        errorMessage.value = 'A senha deve ter no mínimo 6 caracteres.';
+        break;
+      default:
+        errorMessage.value = err.message || 'Ocorreu um erro ao processar. Tente novamente.';
+    }
   } finally {
     isSubmitting.value = false;
   }
@@ -51,11 +90,13 @@ const handleAuth = async () => {
 
 const handleGoogleLogin = async () => {
   isSubmitting.value = true;
+  errorMessage.value = '';
   try {
-    await loginWithGoogle();
+    await googleLogin();
     emit('close');
   } catch (err) {
-    console.error('Erro de login Google:', err);
+    console.error('Erro no Google Login:', err);
+    errorMessage.value = 'Falha ao autenticar com o Google.';
   } finally {
     isSubmitting.value = false;
   }
@@ -87,14 +128,14 @@ const handleGoogleLogin = async () => {
       <!-- Alternador de Abas -->
       <div class="flex border-b border-slate-100 mb-6">
         <button 
-          @click="activeTab = 'login'"
+          @click="activeTab = 'login'; errorMessage = ''"
           class="flex-1 pb-3 text-sm font-bold border-b-2 transition"
           :class="activeTab === 'login' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-400 hover:text-slate-600'"
         >
           Entrar
         </button>
         <button 
-          @click="activeTab = 'register'"
+          @click="activeTab = 'register'; errorMessage = ''"
           class="flex-1 pb-3 text-sm font-bold border-b-2 transition"
           :class="activeTab === 'register' ? 'border-brand-600 text-brand-600' : 'border-transparent text-slate-400 hover:text-slate-600'"
         >
@@ -104,11 +145,11 @@ const handleGoogleLogin = async () => {
 
       <!-- Erros de autenticação -->
       <div 
-        v-if="error" 
+        v-if="errorMessage" 
         class="mb-4 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-semibold flex items-center gap-2"
       >
         <AlertCircle class="w-4 h-4 text-red-500 shrink-0" />
-        <span>{{ error }}</span>
+        <span>{{ errorMessage }}</span>
       </div>
 
       <form @submit.prevent="handleAuth" class="space-y-4">

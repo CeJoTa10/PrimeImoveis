@@ -1,13 +1,14 @@
 import { initializeApp } from "firebase/app";
-import { 
-  getAuth, 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
+import {
+  getAuth,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
   signOut,
-  onAuthStateChanged 
+  onAuthStateChanged,
+  GoogleAuthProvider,
+  signInWithPopup
 } from "firebase/auth";
 
-// Sua configuração do Firebase obtida no console
 const firebaseConfig = {
   apiKey: "AIzaSyCbL_3nj_CyexuqoDZM-9q4H3ZwP-yiIAs",
   authDomain: "prime-imoveis-98b9a.firebaseapp.com",
@@ -18,38 +19,30 @@ const firebaseConfig = {
   measurementId: "G-46YLRRCG13"
 };
 
-// 1. Inicializa o Firebase App
+// Inicializa o Firebase e a Autenticação
 const app = initializeApp(firebaseConfig);
-
-// 2. Inicializa e exporta o módulo de Autenticação
 export const auth = getAuth(app);
 
-// 3. Funções Utilitárias Prontas para Uso no Seu Frontend
+// Provedor do Google
+const googleProvider = new GoogleAuthProvider();
 
-/**
- * Realiza o login com e-mail e senha
- */
+// Exportação das Funções
 export const loginWithEmail = (email, password) => {
   return signInWithEmailAndPassword(auth, email, password);
 };
 
-/**
- * Cria um novo usuário com e-mail e senha
- */
 export const registerWithEmail = (email, password) => {
   return createUserWithEmailAndPassword(auth, email, password);
 };
 
-/**
- * Faz o logout do usuário atual
- */
+export const loginWithGoogle = () => {
+  return signInWithPopup(auth, googleProvider);
+};
+
 export const logoutUser = () => {
   return signOut(auth);
 };
 
-/**
- * Observador de estado (detecta se o usuário está logado ou não em tempo real)
- */
 export const onAuthUpdate = (callback) => {
   return onAuthStateChanged(auth, callback);
 };
