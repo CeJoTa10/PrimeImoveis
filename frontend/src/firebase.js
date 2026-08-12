@@ -3,13 +3,13 @@ import {
   getAuth,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification, // 👈 1. Importe a função
   signOut,
   onAuthStateChanged,
   GoogleAuthProvider,
   signInWithPopup
 } from "firebase/auth";
 
-// Configuração do Firebase
 const firebaseConfig = {
   apiKey: "AIzaSyCbL_3nj_CyexuqoDZM-9q4H3ZwP-yiIAs",
   authDomain: "prime-imoveis-98b9a.firebaseapp.com",
@@ -20,38 +20,35 @@ const firebaseConfig = {
   measurementId: "G-46YLRRCG13"
 };
 
-// 1. Inicializa o Firebase App
 const app = initializeApp(firebaseConfig);
-
-// 2. Exporta o módulo de Autenticação
 export const auth = getAuth(app);
-
-// 3. Provedor de Login do Google
 export const googleProvider = new GoogleAuthProvider();
 
-// 4. Funções de Login / Cadastro
-export const loginWithEmail = (email, password) => {
-  return signInWithEmailAndPassword(auth, email, password);
+// 👈 2. Função para disparar o e-mail de confirmação
+export const sendVerificationEmail = async () => {
+  if (auth.currentUser) {
+    return await sendEmailVerification(auth.currentUser);
+  }
 };
 
-export const registerWithEmail = (email, password) => {
-  return createUserWithEmailAndPassword(auth, email, password);
+export const registerWithEmail = async (email, password) => {
+  // Cria o usuário no Firebase
+  const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+
+  // Envia o e-mail de verificação logo em seguida
+  await sendEmailVerification(userCredential.user);
+
+  return userCredential;
+};
+
+export const loginWithEmail = (email, password) => {
+  return signInWithEmailAndPassword(auth, email, password);
 };
 
 export const loginWithGoogle = () => {
   return signInWithPopup(auth, googleProvider);
 };
 
-// 5. Funções de Logout (Exportadas nos dois formatos para evitar erro de build)
-export const logoutUser = () => {
-  return signOut(auth);
-};
-
-export const logout = () => {
-  return signOut(auth);
-};
-
-// 6. Observador de Estado da Sessão
-export const onAuthUpdate = (callback) => {
-  return onAuthStateChanged(auth, callback);
-};
+export const logout = () => signOut(auth);
+export const logoutUser = () => signOut(auth);
+export const onAuthUpdate = (callback) => onAuthStateChanged(auth, callback);
