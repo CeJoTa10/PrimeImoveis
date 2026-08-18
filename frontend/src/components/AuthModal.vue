@@ -1,9 +1,14 @@
 <script setup>
-import { ref, reactive, watch, nextTick, onUnmounted } from 'vue';
-import { sendAuthCode, verifyAuthCode } from '../services/api.js';
-import { loginWithCustomToken, loginWithGoogle } from '../firebase.js';
+import { ref, reactive, watch } from 'vue';
 import { 
-  X, Mail, KeyRound, ArrowRight, ArrowLeft, RefreshCw, 
+  registerWithEmail, 
+  loginWithEmail, 
+  sendVerificationEmail, 
+  logout, 
+  loginWithGoogle 
+} from '../firebase.js';
+import { 
+  X, User, Mail, Lock, LogIn, UserPlus, Send, RefreshCw, 
   CheckCircle2, AlertCircle, Loader2, Sparkles, ShieldCheck 
 } from 'lucide-vue-next';
 
@@ -16,200 +21,137 @@ const props = defineProps({
 
 const emit = defineEmits(['close']);
 
-// Passos do Fluxo: 1 = Email, 2 = Código OTP de 6 dígitos
-const step = ref(1);
-
-const email = ref('');
-const otpDigits = reactive(['', '', '', '', '', '']);
-const digitInputRefs = ref([]);
+// Modos: 'login' | 'register' | 'verify' (Tela de aviso de e-mail enviado)
+const mode = ref('login');
 
 const isLoading = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
+const showResendButton = ref(false);
 
-// Timer de Reenvio (60 segundos)
-const resendCountdown = ref(0);
-let resendTimer = null;
-
-const startResendTimer = () => {
-  resendCountdown.value = 60;
-  if (resendTimer) clearInterval(resendTimer);
-  resendTimer = setInterval(() => {
-    if (resendCountdown.value > 0) {
-      resendCountdown.value--;
-    } else {
-      clearInterval(resendTimer);
-    }
-  }, 1000);
-};
-
-onUnmounted(() => {
-  if (resendTimer) clearInterval(resendTimer);
+const formData = reactive({
+  name: '',
+  email: '',
+  password: ''
 });
 
-// Reseta formulário ao abrir/fechar modal
+// Limpa campos e estados ao abrir/fechar o modal
 watch(() => props.isOpen, (isOpen) => {
   if (!isOpen) {
-    step.value = 1;
-    email.value = '';
-    otpDigits.forEach((_, i) => (otpDigits[i] = ''));
+    formData.name = '';
+    formData.email = '';
+    formData.password = '';
+    mode.value = 'login';
     errorMessage.value = '';
     successMessage.value = '';
+    showResendButton.value = false;
     isLoading.value = false;
-    if (resendTimer) clearInterval(resendTimer);
-    resendCountdown.value = 0;
   }
 });
 
 /**
- * Passo 1: Solicita o envio do código OTP de 6 dígitos para o e-mail
+ * Mapeia erros do Firebase Auth para mensagens amigáveis em Português
  */
-const handleSendCode = async () => {
-  if (!email.value || !email.value.includes('@')) {
-    errorMessage.value = 'Por favor, digite um e-mail válido.';
-    return;
+const getErrorMessage = (error) => {
+  if (error.code === 'auth/email-not-verified') {
+    return 'Seu e-mail ainda não foi verificado. Acesse sua caixa de entrada para ativar sua conta antes de entrar.';
   }
+  switch (error.code) {
+    case 'auth/email-already-in-use':
+      return 'Este e-mail já está cadastrado.';
+    case 'auth/invalid-credential':
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+      return 'E-mail ou senha incorretos.';
+    case 'auth/weak-password':
+      return 'A senha deve conter no mínimo 6 caracteres.';
+    case 'auth/too-many-requests':
+      return 'Muitas tentativas malsucedidas. Tente novamente mais tarde.';
+    default:
+      return error.message || 'Ocorreu um erro ao processar sua solicitação.';
+  }
+};
 
+/**
+ * Submissão do Formulário (Login ou Cadastro)
+ */
+const handleSubmit = async () => {
+  isLoading.value = true;
+  errorMessage.value = '';
+  successMessage.value = '';
+  showResendButton.value = false;
+
+  try {
+    if (mode.value === 'login') {
+      // 1. Tenta realizar o Login com E-mail e Senha
+      const userCredential = await loginWithEmail(formData.email, formData.password);
+      const user = userCredential.user;
+
+      // 2. CHECAGEM DE SEGURANÇA OBRIGATÓRIA: user.emailVerified
+      if (!user.emailVerified) {
+        // 🛑 Bloqueia o acesso e encerra a sessão imediatamente com logout()
+        await logout();
+        showResendButton.value = true;
+        throw { code: 'auth/email-not-verified' };
+      }
+
+      // ✅ E-mail verificado: permite acesso e fecha o modal
+      emit('close');
+
+    } else if (mode.value === 'register') {
+      // Validação básica de senha
+      if (formData.password.length < 6) {
+        throw new Error('A senha deve conter no mínimo 6 caracteres.');
+      }
+
+      // 1. Cria o usuário, atualiza o nome, envia o e-mail de verificação e desloga imediatamente
+      await registerWithEmail(formData.email, formData.password, formData.name);
+
+      // 2. Exibe a tela de aviso de verificação necessária
+      mode.value = 'verify';
+    }
+  } catch (err) {
+    console.error('[AuthModal] Erro de autenticação:', err);
+    errorMessage.value = getErrorMessage(err);
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+/**
+ * 3️⃣ REENVIO DE E-MAIL DE VERIFICAÇÃO
+ */
+const handleResendVerification = async () => {
   isLoading.value = true;
   errorMessage.value = '';
   successMessage.value = '';
 
   try {
-    const result = await sendAuthCode(email.value);
-    step.value = 2;
-    successMessage.value = result.message || 'Código enviado para seu e-mail!';
-    startResendTimer();
-    
-    // Foca automaticamente na primeira caixa de dígito
-    nextTick(() => {
-      if (digitInputRefs.value[0]) {
-        digitInputRefs.value[0].focus();
-      }
-    });
+    // Autentica temporariamente, envia a verificação e desloga
+    await loginWithEmail(formData.email, formData.password);
+    await sendVerificationEmail();
+    await logout();
+
+    successMessage.value = 'Novo e-mail de verificação enviado com sucesso! Confira sua caixa de entrada e Spam.';
   } catch (err) {
-    console.error('[AuthModal] Erro ao enviar código:', err);
-    errorMessage.value = err.message || 'Falha ao solicitar código de acesso.';
+    console.error('[AuthModal] Erro ao reenviar e-mail:', err);
+    errorMessage.value = 'Não foi possível reenviar o e-mail. Verifique se suas credenciais estão corretas.';
   } finally {
     isLoading.value = false;
   }
-};
-
-/**
- * Lógica do Input Numérico Sequencial dos 6 Dígitos
- */
-const handleDigitInput = (index, event) => {
-  const value = event.target.value;
-  
-  // Limpa caracteres não numéricos
-  const numericValue = value.replace(/\D/g, '');
-  
-  if (numericValue) {
-    otpDigits[index] = numericValue[numericValue.length - 1]; // Pega o último dígito
-    
-    // Avança para o próximo caixa de entrada
-    if (index < 5) {
-      nextTick(() => {
-        if (digitInputRefs.value[index + 1]) {
-          digitInputRefs.value[index + 1].focus();
-        }
-      });
-    }
-  } else {
-    otpDigits[index] = '';
-  }
-
-  // Se os 6 dígitos estiverem preenchidos, dispara a validação automaticamente
-  const fullCode = otpDigits.join('');
-  if (fullCode.length === 6) {
-    handleVerifyCode();
-  }
-};
-
-const handleKeyDown = (index, event) => {
-  // Backspace em caixa vazia recua o foco para a caixa anterior
-  if (event.key === 'Backspace' && !otpDigits[index] && index > 0) {
-    nextTick(() => {
-      if (digitInputRefs.value[index - 1]) {
-        digitInputRefs.value[index - 1].focus();
-      }
-    });
-  }
-};
-
-/**
- * Suporte a Colar (Paste) dos 6 dígitos numéricos
- */
-const handlePaste = (event) => {
-  event.preventDefault();
-  const pastedData = (event.clipboardData || window.clipboardData).getData('text');
-  const numericCode = pastedData.replace(/\D/g, '').slice(0, 6);
-
-  if (numericCode) {
-    numericCode.split('').forEach((char, i) => {
-      if (i < 6) otpDigits[i] = char;
-    });
-    
-    // Foca no último campo ou dispara envio se completo
-    if (numericCode.length === 6) {
-      handleVerifyCode();
-    } else if (digitInputRefs.value[numericCode.length]) {
-      digitInputRefs.value[numericCode.length].focus();
-    }
-  }
-};
-
-/**
- * Passo 2: Valida o código OTP e realiza o Login no Firebase Auth
- */
-const handleVerifyCode = async () => {
-  const code = otpDigits.join('');
-  if (code.length < 6) {
-    errorMessage.value = 'Por favor, informe o código completo de 6 dígitos.';
-    return;
-  }
-
-  isLoading.value = true;
-  errorMessage.value = '';
-
-  try {
-    // 1. Valida o código no backend
-    const result = await verifyAuthCode(email.value, code);
-    
-    // 2. Realiza a autenticação no Firebase utilizando o Custom Token retornado
-    await loginWithCustomToken(result.customToken);
-
-    successMessage.value = 'Autenticado com sucesso!';
-    setTimeout(() => {
-      emit('close');
-    }, 600);
-  } catch (err) {
-    console.error('[AuthModal] Erro de validação:', err);
-    errorMessage.value = err.message || 'Código de verificação incorreto ou expirado.';
-  } finally {
-    isLoading.value = false;
-  }
-};
-
-/**
- * Reenvia o código OTP
- */
-const handleResendCode = async () => {
-  if (resendCountdown.value > 0 || isLoading.value) return;
-  otpDigits.forEach((_, i) => (otpDigits[i] = ''));
-  await handleSendCode();
 };
 
 /**
  * Autenticação via Google
  */
-const handleGoogleLogin = async () => {
+const handleGoogleAuth = async () => {
   isLoading.value = true;
   errorMessage.value = '';
   try {
     await loginWithGoogle();
     emit('close');
   } catch (err) {
-    console.error('Erro Google Auth:', err);
+    console.error('Erro Google Login:', err);
     errorMessage.value = 'Falha ao autenticar com o Google.';
   } finally {
     isLoading.value = false;
@@ -219,7 +161,7 @@ const handleGoogleLogin = async () => {
 
 <template>
   <div v-if="isOpen" class="fixed inset-0 z-50 overflow-y-auto flex items-center justify-center p-4">
-    <!-- Backdrop com Desfoque de Vidro (Liquid Glass Overlay) -->
+    <!-- Backdrop Blur (Liquid Glass Overlay) -->
     <div 
       @click="emit('close')" 
       class="fixed inset-0 bg-slate-950/60 backdrop-blur-md transition-opacity duration-300"
@@ -228,7 +170,7 @@ const handleGoogleLogin = async () => {
     <!-- Modal Card Liquid Glass -->
     <div class="relative liquid-glass w-full max-w-md rounded-3xl p-6 sm:p-8 z-10 shadow-2xl overflow-hidden border border-white/60">
       
-      <!-- Orbe Iluminado de Fundo -->
+      <!-- Orbe Flutuante de Iluminação -->
       <div class="absolute -top-20 -right-20 w-48 h-48 bg-brand-500/20 rounded-full blur-3xl pointer-events-none animate-float-orb"></div>
       <div class="absolute -bottom-20 -left-20 w-48 h-48 bg-amber-500/15 rounded-full blur-3xl pointer-events-none animate-float-orb-reverse"></div>
 
@@ -240,62 +182,134 @@ const handleGoogleLogin = async () => {
         <X class="w-5 h-5" />
       </button>
 
-      <!-- Cabeçalho -->
-      <div class="text-center mb-6 relative">
-        <div class="w-14 h-14 bg-brand-50/80 text-brand-600 rounded-2xl flex items-center justify-center mx-auto mb-3 border border-brand-200/50 shadow-inner">
-          <KeyRound v-if="step === 2" class="w-7 h-7" />
-          <Mail v-else class="w-7 h-7" />
+      <!-- TELA DE AVISO: Registro concluído - Verificação pendente -->
+      <div v-if="mode === 'verify'" class="text-center py-4 space-y-4">
+        <div class="w-16 h-16 bg-emerald-50/80 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto border border-emerald-200/60 shadow-inner">
+          <Mail class="w-8 h-8" />
         </div>
-        <h2 class="text-2xl font-black text-slate-800 tracking-tight">
-          {{ step === 1 ? 'Acesso sem Senha' : 'Digite o Código de 6 Dígitos' }}
-        </h2>
-        <p class="text-xs text-slate-500 mt-1 max-w-xs mx-auto">
-          {{ step === 1 
-              ? 'Receba um código numérico de segurança direto no seu e-mail.' 
-              : `Enviamos o código para ${email}` 
-          }}
+        
+        <h3 class="text-xl font-black text-slate-800 tracking-tight">Confirme seu E-mail</h3>
+        
+        <p class="text-xs text-slate-600 leading-relaxed px-2">
+          Conta criada! Enviamos um link de confirmação para o e-mail 
+          <strong class="text-slate-800 block text-sm font-bold mt-1">{{ formData.email }}</strong>
+          <br>
+          Acesse sua caixa de entrada (ou pasta de Spam) para ativar sua conta antes de fazer o login.
         </p>
+
+        <button 
+          @click="mode = 'login'; errorMessage = ''; successMessage = '';" 
+          class="w-full py-3 px-4 liquid-glass-button text-white font-bold text-sm rounded-xl transition"
+        >
+          Ir para Tela de Login
+        </button>
       </div>
 
-      <!-- Alerta de Erro -->
-      <div v-if="errorMessage" class="mb-4 p-3.5 bg-red-50/90 backdrop-blur-sm border border-red-200 rounded-2xl text-red-700 text-xs font-semibold flex items-center gap-2">
-        <AlertCircle class="w-4 h-4 text-red-500 shrink-0" />
-        <span>{{ errorMessage }}</span>
-      </div>
+      <!-- TELA PRINCIPAL: Login ou Cadastro -->
+      <div v-else class="space-y-5">
+        
+        <!-- Abas Superiores (Entrar / Criar Conta) -->
+        <div class="flex border-b border-slate-200/60 pb-1">
+          <button 
+            @click="mode = 'login'; errorMessage = ''; successMessage = ''; showResendButton = false;"
+            class="flex-1 pb-3 text-sm font-bold border-b-2 transition"
+            :class="mode === 'login' ? 'border-brand-600 text-brand-700 font-black' : 'border-transparent text-slate-400 hover:text-slate-600'"
+          >
+            Entrar
+          </button>
+          <button 
+            @click="mode = 'register'; errorMessage = ''; successMessage = ''; showResendButton = false;"
+            class="flex-1 pb-3 text-sm font-bold border-b-2 transition"
+            :class="mode === 'register' ? 'border-brand-600 text-brand-700 font-black' : 'border-transparent text-slate-400 hover:text-slate-600'"
+          >
+            Criar Conta
+          </button>
+        </div>
 
-      <!-- Alerta de Sucesso -->
-      <div v-if="successMessage" class="mb-4 p-3.5 bg-emerald-50/90 backdrop-blur-sm border border-emerald-200 rounded-2xl text-emerald-700 text-xs font-semibold flex items-center gap-2">
-        <CheckCircle2 class="w-4 h-4 text-emerald-500 shrink-0" />
-        <span>{{ successMessage }}</span>
-      </div>
+        <!-- Alerta de Erro com opção de Reenviar E-mail -->
+        <div v-if="errorMessage" class="p-3.5 bg-red-50/90 backdrop-blur-sm border border-red-200 rounded-2xl text-red-700 text-xs font-semibold flex flex-col gap-2">
+          <div class="flex items-center gap-2">
+            <AlertCircle class="w-4 h-4 text-red-500 shrink-0" />
+            <span>{{ errorMessage }}</span>
+          </div>
 
-      <!-- PASSO 1: Digitação do E-mail -->
-      <div v-if="step === 1" class="space-y-4">
-        <form @submit.prevent="handleSendCode" class="space-y-4">
-          <div>
-            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5 pl-1 block">
-              Seu Endereço de E-mail
-            </label>
+          <!-- Botão para Reenviar E-mail de Confirmação caso esteja bloqueado por falta de verificação -->
+          <button 
+            v-if="showResendButton"
+            @click="handleResendVerification" 
+            type="button"
+            :disabled="isLoading"
+            class="mt-1 text-xs font-extrabold text-brand-700 hover:underline flex items-center gap-1.5 self-start bg-white/80 px-3 py-1.5 rounded-lg border border-brand-200/80 shadow-sm transition"
+          >
+            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isLoading }" />
+            <span>Reenviar E-mail de Confirmação</span>
+          </button>
+        </div>
+
+        <!-- Alerta de Sucesso -->
+        <div v-if="successMessage" class="p-3.5 bg-emerald-50/90 backdrop-blur-sm border border-emerald-200 rounded-2xl text-emerald-700 text-xs font-semibold flex items-center gap-2">
+          <CheckCircle2 class="w-4 h-4 text-emerald-500 shrink-0" />
+          <span>{{ successMessage }}</span>
+        </div>
+
+        <!-- Formulário de Autenticação -->
+        <form @submit.prevent="handleSubmit" class="space-y-4">
+          
+          <!-- Campo Nome (Somente Cadastro) -->
+          <div v-if="mode === 'register'">
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1 block">Nome Completo *</label>
             <div class="relative">
-              <Mail class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+              <User class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
               <input 
-                v-model="email"
-                type="email" 
+                v-model="formData.name"
+                type="text" 
                 required 
-                placeholder="exemplo@dominio.com"
-                class="w-full pl-10 pr-4 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none"
+                placeholder="Como prefere ser chamado?"
+                class="w-full pl-10 pr-3 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none"
               />
             </div>
           </div>
 
+          <!-- Campo E-mail -->
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1 block">Endereço de E-mail *</label>
+            <div class="relative">
+              <Mail class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+              <input 
+                v-model="formData.email"
+                type="email" 
+                required 
+                placeholder="exemplo@dominio.com"
+                class="w-full pl-10 pr-3 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <!-- Campo Senha -->
+          <div>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1 block">Senha de Acesso *</label>
+            <div class="relative">
+              <Lock class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+              <input 
+                v-model="formData.password"
+                type="password" 
+                required 
+                placeholder="No mínimo 6 dígitos"
+                class="w-full pl-10 pr-3 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none"
+              />
+            </div>
+          </div>
+
+          <!-- Botão Submeter -->
           <button 
             type="submit"
             :disabled="isLoading"
             class="w-full py-3 px-4 liquid-glass-button text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50"
           >
             <Loader2 v-if="isLoading" class="w-4 h-4 animate-spin" />
-            <span v-else>Enviar Código de Acesso</span>
-            <ArrowRight v-if="!isLoading" class="w-4 h-4" />
+            <LogIn v-else-if="mode === 'login'" class="w-4 h-4" />
+            <UserPlus v-else class="w-4 h-4" />
+            <span>{{ mode === 'login' ? 'Entrar na Conta' : 'Finalizar Cadastro' }}</span>
           </button>
         </form>
 
@@ -307,7 +321,7 @@ const handleGoogleLogin = async () => {
 
         <button 
           type="button"
-          @click="handleGoogleLogin"
+          @click="handleGoogleAuth"
           :disabled="isLoading"
           class="w-full bg-white/80 hover:bg-white text-slate-700 font-semibold text-sm py-2.5 px-4 rounded-xl flex items-center justify-center gap-2.5 border border-slate-200/80 shadow-sm transition active:scale-[0.98] disabled:opacity-50"
         >
@@ -319,63 +333,13 @@ const handleGoogleLogin = async () => {
           </svg>
           <span>Acessar com o Google</span>
         </button>
-      </div>
-
-      <!-- PASSO 2: Digitação das 6 caixas numéricas do Código OTP -->
-      <div v-else class="space-y-5">
-        
-        <!-- Grid dos 6 dígitos de OTP com Auto-focus sequencial -->
-        <div class="flex justify-between gap-2 sm:gap-2.5 my-2" @paste="handlePaste">
-          <input 
-            v-for="(digit, idx) in otpDigits" 
-            :key="idx"
-            :ref="el => (digitInputRefs[idx] = el)"
-            type="text"
-            inputmode="numeric"
-            maxlength="1"
-            :value="digit"
-            @input="e => handleDigitInput(idx, e)"
-            @keydown="e => handleKeyDown(idx, e)"
-            class="w-12 h-14 text-center text-xl font-extrabold text-brand-700 bg-white/90 border border-slate-200/90 rounded-2xl focus:outline-none focus:border-brand-600 focus:ring-4 focus:ring-brand-500/20 shadow-inner transition duration-150"
-          />
-        </div>
-
-        <button 
-          @click="handleVerifyCode"
-          :disabled="isLoading || otpDigits.join('').length < 6"
-          class="w-full py-3 px-4 liquid-glass-button text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50"
-        >
-          <Loader2 v-if="isLoading" class="w-4 h-4 animate-spin" />
-          <span v-else>Verificar e Entrar</span>
-        </button>
-
-        <!-- Ações Inferiores: Voltar e Reenviar Código com Timer de 60s -->
-        <div class="pt-3 border-t border-slate-200/50 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
-          <button 
-            @click="step = 1"
-            class="text-slate-500 hover:text-slate-800 font-semibold flex items-center gap-1 transition"
-          >
-            <ArrowLeft class="w-3.5 h-3.5" />
-            <span>Alterar e-mail</span>
-          </button>
-
-          <button 
-            @click="handleResendCode"
-            :disabled="resendCountdown > 0 || isLoading"
-            class="text-brand-600 hover:text-brand-700 font-bold flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed transition"
-          >
-            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': isLoading }" />
-            <span v-if="resendCountdown > 0">Reenviar em {{ resendCountdown }}s</span>
-            <span v-else>Reenviar Código</span>
-          </button>
-        </div>
 
       </div>
 
       <div class="mt-6 pt-4 border-t border-slate-200/40 text-center">
         <span class="inline-flex items-center gap-1.5 text-[10px] font-semibold text-slate-400">
           <ShieldCheck class="w-3.5 h-3.5 text-emerald-500" />
-          Autenticação 100% segura e protegida
+          Autenticação 100% segura e encriptada
         </span>
       </div>
 

@@ -4,6 +4,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendEmailVerification,
+  updateProfile,
   signInWithCustomToken,
   signOut,
   onAuthStateChanged,
@@ -26,14 +27,53 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
 /**
- * Autentica o usuário no Firebase Auth utilizando o Custom Token emitido pelo backend
+ * 1️⃣ CRIAR CONTA (CADASTRO)
+ * Cria o usuário, define o nome de exibição, envia o e-mail de verificação e desloga imediatamente.
+ */
+export const registerWithEmail = async (email, password, displayName = '') => {
+  // 1. Cria o usuário no Firebase Auth
+  const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+
+  // 2. Atualiza o perfil com o nome completo informado
+  if (displayName && userCredential.user) {
+    await updateProfile(userCredential.user, { displayName });
+  }
+
+  // 3. Envia o e-mail de verificação
+  await sendEmailVerification(userCredential.user);
+
+  // 4. Desloga imediatamente para impedir sessão não verificada
+  await signOut(auth);
+
+  return userCredential;
+};
+
+/**
+ * 2️⃣ ENTRAR (LOGIN)
+ * Autentica o usuário com e-mail e senha. A checagem de user.emailVerified é realizada no AuthModal.vue.
+ */
+export const loginWithEmail = (email, password) => {
+  return signInWithEmailAndPassword(auth, email, password);
+};
+
+/**
+ * 3️⃣ REENVIO DE E-MAIL DE VERIFICAÇÃO
+ * Dispara o e-mail de confirmação para o usuário atualmente pré-autenticado.
+ */
+export const sendVerificationEmail = async () => {
+  if (auth.currentUser) {
+    return await sendEmailVerification(auth.currentUser);
+  }
+};
+
+/**
+ * Autenticação via Token Customizado (OTP)
  */
 export const loginWithCustomToken = async (customToken) => {
   if (!customToken) {
     throw new Error('Token customizado inválido.');
   }
 
-  // Tratamento para dev mode fallback
   if (typeof customToken === 'string' && customToken.startsWith('dev-custom-token-')) {
     console.log('[Firebase Client] Token Customizado de desenvolvimento recebido.');
     return {
@@ -47,22 +87,6 @@ export const loginWithCustomToken = async (customToken) => {
   }
 
   return await signInWithCustomToken(auth, customToken);
-};
-
-export const sendVerificationEmail = async () => {
-  if (auth.currentUser) {
-    return await sendEmailVerification(auth.currentUser);
-  }
-};
-
-export const registerWithEmail = async (email, password) => {
-  const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-  await sendEmailVerification(userCredential.user);
-  return userCredential;
-};
-
-export const loginWithEmail = (email, password) => {
-  return signInWithEmailAndPassword(auth, email, password);
 };
 
 export const loginWithGoogle = () => {
