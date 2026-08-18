@@ -84,7 +84,6 @@ export async function fetchImovelById(id) {
     console.warn(`[API Service] Falha ao carregar imóvel ${id} via API. Procurando no banco local.`, err.message);
     const found = MOCK_IMOVEIS.find(item => item.id === id || String(item.id) === String(id));
     if (!found) {
-      // Retorna o primeiro imóvel como fallback genérico se a chave não bater exatamente
       return { data: MOCK_IMOVEIS[0], isFallback: true };
     }
     return { data: found, isFallback: true };
@@ -113,6 +112,68 @@ export async function createImovel(formData, token) {
     return await response.json();
   } catch (err) {
     console.error('[API Service] Erro ao cadastrar imóvel:', err);
+    throw err;
+  }
+}
+
+/**
+ * Envia solicitação de geração do código OTP de 6 dígitos
+ */
+export async function sendAuthCode(email) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/send-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Falha ao solicitar código de acesso.');
+    }
+    return data;
+  } catch (err) {
+    console.warn('[API Service] Erro ao enviar código de acesso:', err.message);
+    if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+      console.log('🔑 [DEV FALLBACK] Backend offline. Utilize o código 123456 para testes.');
+      return {
+        success: true,
+        message: 'Modo dev offline: utilize o código 123456 para validar.',
+        isFallback: true
+      };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Valida o código OTP de 6 dígitos e obtém o Custom Token
+ */
+export async function verifyAuthCode(email, code) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/verify-code`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Código incorreto ou expirado.');
+    }
+    return data;
+  } catch (err) {
+    console.warn('[API Service] Erro ao verificar código:', err.message);
+    if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+      if (String(code).trim() === '123456') {
+        return {
+          success: true,
+          customToken: `dev-custom-token-${btoa(email)}`,
+          user: { uid: 'dev-123', email }
+        };
+      }
+      throw new Error('Código incorreto para teste offline. Utilize 123456.');
+    }
     throw err;
   }
 }

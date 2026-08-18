@@ -19,11 +19,14 @@ const applyFilters = () => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-slate-50">
+  <div class="min-h-screen bg-slate-50/50">
     
-    <!-- Banner de Cabeçalho do Lançamentos (Visual Diferenciado com Amber/Gold) -->
-    <div class="bg-gradient-to-r from-amber-950 via-slate-900 to-amber-950 text-white py-14 px-4 sm:px-6 lg:px-8 border-b border-amber-900/50">
-      <div class="max-w-7xl mx-auto">
+    <!-- Banner de Cabeçalho dos Lançamentos (Liquid Glass com Orbe Amber) -->
+    <div class="bg-gradient-to-r from-amber-950 via-slate-950 to-amber-950 text-white py-16 px-4 sm:px-6 lg:px-8 border-b border-white/10 relative overflow-hidden">
+      <!-- Orbe Amber Flutuante -->
+      <div class="absolute top-0 right-1/3 w-96 h-96 bg-amber-500/20 rounded-full blur-[140px] pointer-events-none animate-float-orb"></div>
+
+      <div class="max-w-7xl mx-auto relative z-10">
         <div class="flex items-center gap-2 text-amber-400 text-xs font-bold uppercase tracking-wider mb-2">
           <Sparkles class="w-4 h-4 text-amber-400" />
           <span>Lançamentos & Obras</span>
@@ -36,32 +39,32 @@ const applyFilters = () => {
           Seja o primeiro a garantir unidades em empreendimentos na planta e recém-lançados com condições especiais de tabela zero.
         </p>
 
-        <!-- Filtros Integrados no Topo -->
-        <div class="mt-8 bg-white/95 backdrop-blur-md p-4 sm:p-5 rounded-2xl sm:rounded-3xl shadow-xl border border-white/20 text-slate-800">
+        <!-- Filtros Integrados no Topo com Liquid Glass -->
+        <div class="mt-8 liquid-glass p-5 rounded-3xl shadow-2xl border border-white/40 text-slate-800">
           <form @submit.prevent="applyFilters" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
             
             <!-- Localização -->
             <div class="relative flex flex-col justify-center">
-              <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1">Localização</label>
+              <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 pl-1">Localização</label>
               <div class="relative">
-                <MapPin class="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                <MapPin class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
                 <input 
                   v-model="filters.cidade"
                   type="text" 
                   placeholder="Cidade ou Bairro"
-                  class="w-full pl-9 pr-3 py-2 text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition"
+                  class="w-full pl-10 pr-3 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none"
                 />
               </div>
             </div>
 
             <!-- Tipo -->
             <div class="relative flex flex-col justify-center">
-              <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1">Tipo</label>
+              <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 pl-1">Tipo</label>
               <div class="relative">
-                <Building class="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                <Building class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
                 <select 
                   v-model="filters.tipo"
-                  class="w-full pl-9 pr-3 py-2 text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition cursor-pointer"
+                  class="w-full pl-10 pr-3 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none appearance-none cursor-pointer"
                 >
                   <option value="">Todos os tipos</option>
                   <option value="Apartamento">Apartamento</option>
@@ -73,12 +76,12 @@ const applyFilters = () => {
 
             <!-- Preço Máximo -->
             <div class="relative flex flex-col justify-center">
-              <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1">Investimento Máximo</label>
+              <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 pl-1">Investimento Máximo</label>
               <div class="relative">
-                <DollarSign class="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                <DollarSign class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
                 <select 
                   v-model="filters.precoMax"
-                  class="w-full pl-9 pr-3 py-2 text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition cursor-pointer"
+                  class="w-full pl-10 pr-3 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none appearance-none cursor-pointer"
                 >
                   <option value="">Qualquer valor</option>
                   <option value="1000000">Até R$ 1 Milhão</option>
@@ -90,12 +93,12 @@ const applyFilters = () => {
 
             <!-- Quartos -->
             <div class="relative flex flex-col justify-center">
-              <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1">Quartos</label>
+              <label class="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1 pl-1">Quartos</label>
               <div class="relative">
-                <BedDouble class="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                <BedDouble class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
                 <select 
                   v-model="filters.quartos"
-                  class="w-full pl-9 pr-3 py-2 text-sm text-slate-800 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition cursor-pointer"
+                  class="w-full pl-10 pr-3 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none appearance-none cursor-pointer"
                 >
                   <option value="">Qualquer qtd</option>
                   <option value="1">1+ quarto</option>
@@ -110,7 +113,7 @@ const applyFilters = () => {
             <div class="flex items-end">
               <button 
                 type="submit"
-                class="w-full bg-amber-600 hover:bg-amber-700 active:bg-amber-800 text-white font-semibold text-sm py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-md transition duration-150"
+                class="w-full py-2.5 px-4 bg-amber-600/90 hover:bg-amber-600 text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 shadow-md shadow-amber-500/20 active:scale-95 transition"
               >
                 <Search class="w-4 h-4" />
                 <span>Ver Lançamentos</span>

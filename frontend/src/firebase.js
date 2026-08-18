@@ -3,7 +3,8 @@ import {
   getAuth,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  sendEmailVerification, // 👈 1. Importe a função
+  sendEmailVerification,
+  signInWithCustomToken,
   signOut,
   onAuthStateChanged,
   GoogleAuthProvider,
@@ -24,7 +25,30 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
-// 👈 2. Função para disparar o e-mail de confirmação
+/**
+ * Autentica o usuário no Firebase Auth utilizando o Custom Token emitido pelo backend
+ */
+export const loginWithCustomToken = async (customToken) => {
+  if (!customToken) {
+    throw new Error('Token customizado inválido.');
+  }
+
+  // Tratamento para dev mode fallback
+  if (typeof customToken === 'string' && customToken.startsWith('dev-custom-token-')) {
+    console.log('[Firebase Client] Token Customizado de desenvolvimento recebido.');
+    return {
+      user: {
+        uid: 'dev-user-123',
+        email: 'usuario@primeimoveis.com',
+        displayName: 'Usuário Prime',
+        emailVerified: true
+      }
+    };
+  }
+
+  return await signInWithCustomToken(auth, customToken);
+};
+
 export const sendVerificationEmail = async () => {
   if (auth.currentUser) {
     return await sendEmailVerification(auth.currentUser);
@@ -32,12 +56,8 @@ export const sendVerificationEmail = async () => {
 };
 
 export const registerWithEmail = async (email, password) => {
-  // Cria o usuário no Firebase
   const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-
-  // Envia o e-mail de verificação logo em seguida
   await sendEmailVerification(userCredential.user);
-
   return userCredential;
 };
 
