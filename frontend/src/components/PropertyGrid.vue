@@ -26,7 +26,8 @@ const fetchImoveis = async () => {
   if (props.filters.quartos) queryParams.append('quartos', props.filters.quartos);
 
   try {
-    const response = await fetch(`http://localhost:3000/api/imoveis?${queryParams.toString()}`);
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const response = await fetch(`${API_URL}/api/imoveis?${queryParams.toString()}`);
     if (!response.ok) throw new Error('Falha ao conectar na API de imóveis');
     const data = await response.json();
     imoveis.value = data;

@@ -10,6 +10,12 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Middlewares Globais
+app.use((req, res, next) => {
+  if (req.headers['access-control-request-private-network']) {
+    res.setHeader('Access-Control-Allow-Private-Network', 'true');
+  }
+  next();
+});
 app.use(cors({
   origin: '*', // Em produção, restrinja para o domínio do frontend
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
