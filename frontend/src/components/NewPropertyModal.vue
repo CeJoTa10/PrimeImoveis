@@ -1,6 +1,7 @@
 <script setup>
 import { ref, reactive, watch } from 'vue';
 import { useAuth } from '../store/auth.js';
+import { createImovel } from '../services/api.js';
 import { X, Plus, AlertCircle, Loader2 } from 'lucide-vue-next';
 
 const props = defineProps({
@@ -53,22 +54,7 @@ const handleSubmit = async () => {
   errorMessage.value = '';
 
   try {
-    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
-    const response = await fetch(`${API_URL}/api/imoveis`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token.value}`
-      },
-      body: JSON.stringify(formData)
-    });
-
-    if (!response.ok) {
-      const errData = await response.json();
-      throw new Error(errData.error || 'Erro desconhecido ao salvar o imóvel.');
-    }
-
-    const novoImovel = await response.json();
+    const novoImovel = await createImovel(formData, token.value);
     emit('property-created', novoImovel);
     emit('close');
   } catch (err) {

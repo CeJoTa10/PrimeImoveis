@@ -1,6 +1,7 @@
 <script setup>
 import { ref } from 'vue';
-import { BedDouble, Bath, Car, Maximize, Heart, MapPin } from 'lucide-vue-next';
+import { useRouter } from 'vue-router';
+import { BedDouble, Bath, Car, Maximize, Heart, MapPin, Sparkles } from 'lucide-vue-next';
 
 const props = defineProps({
   imovel: {
@@ -9,11 +10,19 @@ const props = defineProps({
   }
 });
 
+const router = useRouter();
+
 // Estado de favorito local por card
 const isFavorited = ref(false);
 
 const toggleFavorite = () => {
   isFavorited.value = !isFavorited.value;
+};
+
+const goToDetails = () => {
+  if (props.imovel?.id) {
+    router.push(`/imovel/${props.imovel.id}`);
+  }
 };
 
 // Formatação brasileira de moedas
@@ -22,27 +31,39 @@ const formatCurrency = (value) => {
     style: 'currency',
     currency: 'BRL',
     maximumFractionDigits: 0
-  }).format(value);
+  }).format(value || 0);
 };
 </script>
 
 <template>
-  <div class="group bg-white rounded-2xl overflow-hidden border border-slate-100 hover:border-slate-200 shadow-sm hover:shadow-lg transition-all duration-300 flex flex-col h-full">
+  <div 
+    @click="goToDetails"
+    class="group bg-white rounded-2xl overflow-hidden border border-slate-100 hover:border-brand-200 shadow-sm hover:shadow-xl transition-all duration-300 flex flex-col h-full cursor-pointer select-none"
+  >
     
     <!-- Imagem de Destaque -->
     <div class="relative overflow-hidden aspect-[4/3] bg-slate-100">
       <img 
         :src="imovel.imagem" 
         :alt="imovel.titulo" 
-        class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out select-none"
+        class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500 ease-out"
       />
+      
       <!-- Destaque Tag -->
-      <span 
-        v-if="imovel.destaque" 
-        class="absolute top-3 left-3 bg-brand-600 text-white text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-wider shadow-sm z-10"
-      >
-        Destaque
-      </span>
+      <div class="absolute top-3 left-3 flex flex-col gap-1 z-10">
+        <span 
+          v-if="imovel.destaque" 
+          class="bg-brand-600 text-white text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-wider shadow-sm w-fit"
+        >
+          Destaque
+        </span>
+        <span 
+          v-if="imovel.lancamento" 
+          class="bg-amber-500 text-white text-[10px] font-extrabold px-2.5 py-1 rounded-lg uppercase tracking-wider shadow-sm w-fit flex items-center gap-1"
+        >
+          <Sparkles class="w-3 h-3" /> Lançamento
+        </span>
+      </div>
 
       <!-- Tipo de Imóvel Tag -->
       <span 
@@ -70,7 +91,7 @@ const formatCurrency = (value) => {
       <!-- Preço -->
       <div class="flex items-baseline gap-1.5 mb-2">
         <span class="text-xl font-extrabold text-brand-700">{{ formatCurrency(imovel.preco) }}</span>
-        <span v-if="imovel.tipo === 'Aluguel'" class="text-xs text-slate-400 font-medium">/ mês</span>
+        <span v-if="imovel.transacao === 'Aluguel' || imovel.tipo === 'Aluguel'" class="text-xs text-slate-400 font-medium">/ mês</span>
       </div>
 
       <!-- Título -->

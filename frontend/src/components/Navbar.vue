@@ -30,17 +30,44 @@ const handleLogout = async () => {
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
       <div class="flex justify-between h-16">
         
-        <!-- Logo e Links Esquerdos -->
+        <!-- Logo e Links Esquerdos com Router Links -->
         <div class="flex items-center">
-          <a href="#" class="flex items-center gap-2 text-brand-700 font-extrabold text-xl tracking-tight transition hover:opacity-90">
+          <router-link to="/" class="flex items-center gap-2 text-brand-700 font-extrabold text-xl tracking-tight transition hover:opacity-90">
             <Home class="w-6 h-6 text-brand-600 stroke-[2.5]" />
             <span>Prime<span class="text-slate-800 font-medium">Imóveis</span></span>
-          </a>
+          </router-link>
+
           <div class="hidden md:flex ml-10 space-x-8">
-            <a href="#" class="border-b-2 border-brand-600 px-1 pt-1 text-sm font-semibold text-brand-700">Comprar</a>
-            <a href="#" class="border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700 transition">Alugar</a>
-            <a href="#" class="border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700 transition">Lançamentos</a>
-            <a href="#" class="border-b-2 border-transparent px-1 pt-1 text-sm font-medium text-slate-500 hover:border-slate-300 hover:text-slate-700 transition">Anunciar</a>
+            <router-link 
+              to="/comprar" 
+              class="px-1 pt-1 text-sm font-medium text-slate-500 hover:text-brand-600 transition border-b-2 border-transparent"
+              active-class="!font-bold !text-brand-700 !border-brand-600"
+            >
+              Comprar
+            </router-link>
+
+            <router-link 
+              to="/alugar" 
+              class="px-1 pt-1 text-sm font-medium text-slate-500 hover:text-brand-600 transition border-b-2 border-transparent"
+              active-class="!font-bold !text-brand-700 !border-brand-600"
+            >
+              Alugar
+            </router-link>
+
+            <router-link 
+              to="/lancamentos" 
+              class="px-1 pt-1 text-sm font-medium text-slate-500 hover:text-brand-600 transition border-b-2 border-transparent"
+              active-class="!font-bold !text-brand-700 !border-brand-600"
+            >
+              Lançamentos
+            </router-link>
+
+            <button 
+              @click="emit('open-new-property')" 
+              class="px-1 pt-1 text-sm font-medium text-slate-500 hover:text-slate-700 transition"
+            >
+              Anunciar
+            </button>
           </div>
         </div>
 
@@ -102,14 +129,44 @@ const handleLogout = async () => {
       </div>
     </div>
 
-    <!-- Menu Dropdown Mobile -->
+    <!-- Menu Dropdown Mobile com Router Links -->
     <div v-show="mobileMenuOpen" class="md:hidden border-t border-slate-100 bg-white">
       <div class="pt-2 pb-3 space-y-1 px-4">
-        <a href="#" class="block px-3 py-2 rounded-xl text-base font-semibold text-brand-700 bg-brand-50">Comprar</a>
-        <a href="#" class="block px-3 py-2 rounded-xl text-base font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900">Alugar</a>
-        <a href="#" class="block px-3 py-2 rounded-xl text-base font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900">Lançamentos</a>
-        <a href="#" class="block px-3 py-2 rounded-xl text-base font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900">Anunciar</a>
+        <router-link 
+          to="/comprar" 
+          @click="mobileMenuOpen = false"
+          class="block px-3 py-2 rounded-xl text-base font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          active-class="!font-semibold !text-brand-700 !bg-brand-50"
+        >
+          Comprar
+        </router-link>
+
+        <router-link 
+          to="/alugar" 
+          @click="mobileMenuOpen = false"
+          class="block px-3 py-2 rounded-xl text-base font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          active-class="!font-semibold !text-brand-700 !bg-brand-50"
+        >
+          Alugar
+        </router-link>
+
+        <router-link 
+          to="/lancamentos" 
+          @click="mobileMenuOpen = false"
+          class="block px-3 py-2 rounded-xl text-base font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          active-class="!font-semibold !text-brand-700 !bg-brand-50"
+        >
+          Lançamentos
+        </router-link>
+
+        <button 
+          @click="emit('open-new-property'); mobileMenuOpen = false" 
+          class="block w-full text-left px-3 py-2 rounded-xl text-base font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+        >
+          Anunciar
+        </button>
       </div>
+
       <div class="pt-4 pb-4 border-t border-slate-100 px-4">
         <div v-if="user" class="flex items-center gap-3">
           <div class="w-10 h-10 rounded-full bg-brand-100 flex items-center justify-center text-brand-700 font-bold border border-brand-200">
