@@ -3,6 +3,7 @@ import {
   getAuth,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendEmailVerification,
   updateProfile,
   signInWithCustomToken,
   signOut,
@@ -28,9 +29,8 @@ export const googleProvider = new GoogleAuthProvider();
 
 /**
  * 1️⃣ CRIAR CONTA (CADASTRO)
- * Cria o usuário e atualiza o perfil com o nome.
- * NÃO desloga imediatamente — o fluxo OTP assume a verificação.
- * Retorna { user } com uid para envio ao backend.
+ * Cria o usuário, atualiza o perfil com o nome, dispara o e-mail de verificação
+ * nativo do Firebase e desloga imediatamente para evitar sessão sem e-mail verificado.
  */
 export const registerWithEmail = async (email, password, displayName = '') => {
   const userCredential = await createUserWithEmailAndPassword(auth, email, password);
@@ -39,7 +39,23 @@ export const registerWithEmail = async (email, password, displayName = '') => {
     await updateProfile(userCredential.user, { displayName });
   }
 
+  // Dispara o e-mail de verificação nativo do Firebase
+  await sendEmailVerification(userCredential.user);
+
+  // Desloga imediatamente — acesso só é permitido após e-mail verificado
+  await signOut(auth);
+
   return userCredential;
+};
+
+/**
+ * 3️⃣ REENVIO DO E-MAIL DE VERIFICAÇÃO
+ * Autentica temporariamente, reenvia o e-mail de verificação e desloga.
+ */
+export const resendVerificationEmail = async (email, password) => {
+  const { user } = await signInWithEmailAndPassword(auth, email, password);
+  await sendEmailVerification(user);
+  await signOut(auth);
 };
 
 /**
