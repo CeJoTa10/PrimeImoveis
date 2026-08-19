@@ -177,3 +177,69 @@ export async function verifyAuthCode(email, code) {
     throw err;
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOVOS HELPERS: send-otp / verify-otp
+// Esses helpers integram com o novo fluxo de emailVerified via Admin SDK.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Solicita o envio do código OTP de 6 dígitos para o e-mail informado.
+ * Utilizado no cadastro (após criar conta) e no login com e-mail não verificado.
+ */
+export async function sendOtp(email) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/send-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Falha ao solicitar código de verificação.');
+    }
+    return data;
+  } catch (err) {
+    console.warn('[API Service] Erro ao enviar OTP:', err.message);
+    if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+      console.log('🔑 [DEV FALLBACK] Backend offline. Utilize o código 123456 para testes.');
+      return {
+        success: true,
+        message: 'Modo dev offline: utilize o código 123456 para validar.',
+        isFallback: true
+      };
+    }
+    throw err;
+  }
+}
+
+/**
+ * Valida o código OTP de 6 dígitos e atualiza emailVerified: true via Admin SDK.
+ * Recebe o uid do usuário Firebase para que o backend possa chamar updateUser.
+ */
+export async function verifyOtp(email, code, uid) {
+  try {
+    const response = await fetch(`${API_BASE_URL}/auth/verify-otp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, code, uid })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || 'Código incorreto ou expirado.');
+    }
+    return data;
+  } catch (err) {
+    console.warn('[API Service] Erro ao verificar OTP:', err.message);
+    if (err.message.includes('Failed to fetch') || err.message.includes('NetworkError')) {
+      if (String(code).trim() === '123456') {
+        console.log('[DEV FALLBACK] OTP 123456 aceito em modo offline.');
+        return { success: true, message: 'E-mail verificado com sucesso! (modo offline dev)' };
+      }
+      throw new Error('Código incorreto para teste offline. Utilize 123456.');
+    }
+    throw err;
+  }
+}

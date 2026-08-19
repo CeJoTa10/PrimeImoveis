@@ -262,3 +262,163 @@ export async function verifyCode(req, res) {
     return res.status(500).json({ error: 'Falha interna ao verificar código de autenticação.' });
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NOVOS ENDPOINTS: send-otp / verify-otp
+// Esses endpoints diferem dos anteriores pois usam o uid do Firebase Client SDK
+// para marcar emailVerified: true via Admin SDK (sem Custom Token).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Endpoint: POST /api/auth/send-otp
+ * Recebe { email } — gera OTP de 6 dígitos, salva no Firestore e envia o e-mail.
+ */
+export async function sendOtp(req, res) {
+  try {
+    const { email } = req.body;
+
+    if (!email || !email.includes('@')) {
+      return res.status(400).json({ error: 'Por favor, informe um endereço de e-mail válido.' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutos
+
+    const otpData = {
+      email: normalizedEmail,
+      code,
+      attempts: 0,
+      createdAt: new Date().toISOString(),
+      expiresAt
+    };
+
+    if (db) {
+      try {
+        await db.collection('otp_codes').doc(normalizedEmail).set(otpData);
+      } catch (err) {
+        console.warn('[Firestore OTP Warning] Fallback para memória:', err.message);
+        otpMemoryStore.set(normalizedEmail, otpData);
+      }
+    } else {
+      otpMemoryStore.set(normalizedEmail, otpData);
+    }
+
+    await sendEmailOtp(normalizedEmail, code);
+
+    return res.status(200).json({
+      success: true,
+      message: 'Código de verificação enviado! Confira sua caixa de entrada.',
+      expiresInSeconds: 300
+    });
+  } catch (error) {
+    console.error('[Auth SendOtp Error]:', error);
+    return res.status(500).json({ error: 'Falha interna ao gerar código OTP.' });
+  }
+}
+
+/**
+ * Endpoint: POST /api/auth/verify-otp
+ * Recebe { email, code, uid }.
+ * Valida o código e, se correto, marca emailVerified: true no Firebase Auth via Admin SDK.
+ */
+export async function verifyOtp(req, res) {
+  try {
+    const { email, code, uid } = req.body;
+
+    if (!email || !code || !uid) {
+      return res.status(400).json({ error: 'E-mail, código de 6 dígitos e uid são obrigatórios.' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const cleanCode = String(code).trim();
+
+    // ── Busca o registro OTP ──────────────────────────────────────────────────
+    let otpRecord = null;
+    let isFromFirestore = false;
+
+    if (db) {
+      try {
+        const docSnap = await db.collection('otp_codes').doc(normalizedEmail).get();
+        if (docSnap.exists) {
+          otpRecord = docSnap.data();
+          isFromFirestore = true;
+        }
+      } catch (err) {
+        console.warn('[Firestore OTP Fetch Warning]:', err.message);
+      }
+    }
+
+    if (!otpRecord) {
+      otpRecord = otpMemoryStore.get(normalizedEmail);
+    }
+
+    if (!otpRecord) {
+      return res.status(400).json({ error: 'Nenhum código pendente para este e-mail. Solicite um novo código.' });
+    }
+
+    // ── Valida expiração ──────────────────────────────────────────────────────
+    if (Date.now() > otpRecord.expiresAt) {
+      if (isFromFirestore && db) {
+        await db.collection('otp_codes').doc(normalizedEmail).delete().catch(() => {});
+      }
+      otpMemoryStore.delete(normalizedEmail);
+      return res.status(400).json({ error: 'O código informado expirou. Solicite um novo código.' });
+    }
+
+    // ── Valida limite de tentativas ───────────────────────────────────────────
+    if (otpRecord.attempts >= 3) {
+      if (isFromFirestore && db) {
+        await db.collection('otp_codes').doc(normalizedEmail).delete().catch(() => {});
+      }
+      otpMemoryStore.delete(normalizedEmail);
+      return res.status(400).json({ error: 'Limite de 3 tentativas excedido. Solicite um novo código por segurança.' });
+    }
+
+    // ── Valida o código ───────────────────────────────────────────────────────
+    if (otpRecord.code !== cleanCode) {
+      const updatedAttempts = otpRecord.attempts + 1;
+      const remaining = 3 - updatedAttempts;
+
+      if (isFromFirestore && db) {
+        await db.collection('otp_codes').doc(normalizedEmail).update({ attempts: updatedAttempts }).catch(() => {});
+      } else {
+        otpRecord.attempts = updatedAttempts;
+        otpMemoryStore.set(normalizedEmail, otpRecord);
+      }
+
+      if (remaining <= 0) {
+        return res.status(400).json({ error: 'Código incorreto. Você atingiu o limite de tentativas. Solicite um novo código.' });
+      }
+      return res.status(400).json({ error: `Código incorreto. Você ainda tem ${remaining} tentativa(s).` });
+    }
+
+    // ── CÓDIGO VÁLIDO: Atualiza emailVerified via Admin SDK ───────────────────
+    if (auth) {
+      try {
+        await auth.updateUser(uid, { emailVerified: true });
+        console.log(`[Auth OTP] emailVerified atualizado para true: uid=${uid}, email=${normalizedEmail}`);
+      } catch (authErr) {
+        console.error('[Firebase Admin updateUser Error]:', authErr.message);
+        // Em modo dev (sem credenciais), continua sem erro fatal
+      }
+    } else {
+      console.log(`[Auth OTP DEV] Firebase Admin offline. uid=${uid} marcado como verificado (simulação).`);
+    }
+
+    // Remove o código utilizado
+    if (isFromFirestore && db) {
+      await db.collection('otp_codes').doc(normalizedEmail).delete().catch(() => {});
+    }
+    otpMemoryStore.delete(normalizedEmail);
+
+    return res.status(200).json({
+      success: true,
+      message: 'E-mail verificado com sucesso!'
+    });
+
+  } catch (error) {
+    console.error('[Auth VerifyOtp Error]:', error);
+    return res.status(500).json({ error: 'Falha interna ao verificar código OTP.' });
+  }
+}

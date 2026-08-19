@@ -3,13 +3,13 @@ import {
   getAuth,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  sendEmailVerification,
   updateProfile,
   signInWithCustomToken,
   signOut,
   onAuthStateChanged,
   GoogleAuthProvider,
-  signInWithPopup
+  signInWithPopup,
+  reload
 } from "firebase/auth";
 
 const firebaseConfig = {
@@ -28,46 +28,43 @@ export const googleProvider = new GoogleAuthProvider();
 
 /**
  * 1️⃣ CRIAR CONTA (CADASTRO)
- * Cria o usuário, define o nome de exibição, envia o e-mail de verificação e desloga imediatamente.
+ * Cria o usuário e atualiza o perfil com o nome.
+ * NÃO desloga imediatamente — o fluxo OTP assume a verificação.
+ * Retorna { user } com uid para envio ao backend.
  */
 export const registerWithEmail = async (email, password, displayName = '') => {
-  // 1. Cria o usuário no Firebase Auth
   const userCredential = await createUserWithEmailAndPassword(auth, email, password);
 
-  // 2. Atualiza o perfil com o nome completo informado
   if (displayName && userCredential.user) {
     await updateProfile(userCredential.user, { displayName });
   }
-
-  // 3. Envia o e-mail de verificação
-  await sendEmailVerification(userCredential.user);
-
-  // 4. Desloga imediatamente para impedir sessão não verificada
-  await signOut(auth);
 
   return userCredential;
 };
 
 /**
  * 2️⃣ ENTRAR (LOGIN)
- * Autentica o usuário com e-mail e senha. A checagem de user.emailVerified é realizada no AuthModal.vue.
+ * Autentica o usuário com e-mail e senha.
+ * A checagem de user.emailVerified é realizada no AuthModal.vue.
  */
 export const loginWithEmail = (email, password) => {
   return signInWithEmailAndPassword(auth, email, password);
 };
 
 /**
- * 3️⃣ REENVIO DE E-MAIL DE VERIFICAÇÃO
- * Dispara o e-mail de confirmação para o usuário atualmente pré-autenticado.
+ * Força a recarga do token do usuário atual para refletir
+ * mudanças no emailVerified feitas pelo Admin SDK no backend.
  */
-export const sendVerificationEmail = async () => {
+export const reloadCurrentUser = async () => {
   if (auth.currentUser) {
-    return await sendEmailVerification(auth.currentUser);
+    await reload(auth.currentUser);
+    return auth.currentUser;
   }
+  return null;
 };
 
 /**
- * Autenticação via Token Customizado (OTP)
+ * Autenticação via Token Customizado (fluxo OTP legado)
  */
 export const loginWithCustomToken = async (customToken) => {
   if (!customToken) {
