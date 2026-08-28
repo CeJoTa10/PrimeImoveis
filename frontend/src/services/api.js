@@ -1,8 +1,8 @@
 import { MOCK_IMOVEIS } from '../data/mockImoveis.js';
 
-// Resolve a URL base da API utilizando a variável de ambiente VITE_API_URL do Vite
-const rawApiUrl = (import.meta.env.VITE_API_URL || 'http://localhost:3000/api').trim().replace(/\/$/, '');
-export const API_BASE_URL = rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`;
+// Resolve a URL base da API utilizando a variável de ambiente VITE_API_URL ou relativo '/api'
+const rawApiUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '');
+export const API_BASE_URL = rawApiUrl ? (rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`) : '/api';
 
 /**
  * Filtra a lista local mock quando a API estiver offline
