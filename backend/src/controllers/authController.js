@@ -5,25 +5,30 @@ import nodemailer from 'nodemailer';
 const otpMemoryStore = new Map();
 
 /**
- * Cria ou recupera o transportador de e-mail (Nodemailer)
+ * Cria ou recupera o transportador de e-mail (Nodemailer) de forma segura
  */
 function getEmailTransporter() {
-  if (process.env.SMTP_HOST && process.env.SMTP_USER) {
-    return nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT) || 587,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS
-      }
-    });
+  if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+    try {
+      return nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: process.env.SMTP_SECURE === 'true',
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS
+        }
+      });
+    } catch (err) {
+      console.warn('[Nodemailer Transporter Error] Falha ao instanciar transportador SMTP:', err.message);
+      return null;
+    }
   }
   return null;
 }
 
 /**
- * Dispara o envio do e-mail com o código OTP
+ * Dispara o envio do e-mail com o código OTP (sem lançar exceções não tratadas)
  */
 async function sendEmailOtp(email, code) {
   const transporter = getEmailTransporter();
@@ -36,7 +41,7 @@ async function sendEmailOtp(email, code) {
       </div>
       <div style="background-color: #ffffff; padding: 30px; border-radius: 16px; border: 1px solid #e2e8f0; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.05);">
         <h2 style="color: #1e293b; font-size: 18px; margin-top: 0;">Seu Código de Acesso Exclusivo</h2>
-        <p style="color: #475569; font-size: 14px; line-height: 1.5;">Digite os 6 dígitos abaixo na tela de login para validar sua entrada sem senha:</p>
+        <p style="color: #475569; font-size: 14px; line-height: 1.5;">Digite os 6 dígitos abaixo na tela de validação para confirmar seu cadastro:</p>
         
         <div style="margin: 25px 0; background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%); padding: 18px; border-radius: 12px; font-size: 32px; font-weight: 900; letter-spacing: 8px; color: #1d4ed8; border: 1px dashed #bfdbfe;">
           ${code}
@@ -62,10 +67,11 @@ async function sendEmailOtp(email, code) {
     }
   }
 
-  // Fallback para ambiente de desenvolvimento / logs de console
-  console.log('\n======================================================');
-  console.log(`🔑 [OTP DEV FALLBACK] Código de 6 dígitos gerado!`);
-  console.log(`📧 E-mail do usuário: ${email}`);
+  // Fallback seguro: registra o aviso e loga o código OTP no terminal/logs da Vercel
+  console.warn('[OTP Mailer Warning] Credenciais SMTP não configuradas ou falha no transporte. Código OTP impresso no log:');
+  console.log('======================================================');
+  console.log(`🔑 [OTP FALLBACK LOG] Código de 6 dígitos gerado!`);
+  console.log(`📧 E-mail: ${email}`);
   console.log(`🔢 Código OTP: ${code}`);
   console.log(`⏱️ Validade: 5 minutos`);
   console.log('======================================================\n');
@@ -76,17 +82,18 @@ async function sendEmailOtp(email, code) {
  */
 export async function sendCode(req, res) {
   try {
-    const { email } = req.body;
+    const { email } = req.body || {};
 
     if (!email || !email.includes('@')) {
-      return res.status(400).json({ error: 'Por favor, informe um endereço de e-mail válido.' });
+      return res.status(400).json({
+        success: false,
+        error: 'Por favor, informe um endereço de e-mail válido.'
+      });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-
-    // Gera um código aleatório numérico de 6 dígitos
     const code = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutos de validade
+    const expiresAt = Date.now() + 5 * 60 * 1000;
 
     const otpData = {
       email: normalizedEmail,
@@ -96,7 +103,6 @@ export async function sendCode(req, res) {
       expiresAt
     };
 
-    // Tenta salvar no Firestore se o Admin SDK estiver conectado
     if (db) {
       try {
         await db.collection('otp_codes').doc(normalizedEmail).set(otpData);
@@ -108,7 +114,6 @@ export async function sendCode(req, res) {
       otpMemoryStore.set(normalizedEmail, otpData);
     }
 
-    // Dispara o envio de e-mail (ou log dev)
     await sendEmailOtp(normalizedEmail, code);
 
     return res.status(200).json({
@@ -118,7 +123,11 @@ export async function sendCode(req, res) {
     });
   } catch (error) {
     console.error('[Auth SendCode Error]:', error);
-    return res.status(500).json({ error: 'Falha interna ao gerar código de autenticação.' });
+    return res.status(500).json({
+      success: false,
+      error: 'Falha ao enviar e-mail de verificação.',
+      details: error.message
+    });
   }
 }
 
@@ -127,10 +136,13 @@ export async function sendCode(req, res) {
  */
 export async function verifyCode(req, res) {
   try {
-    const { email, code } = req.body;
+    const { email, code } = req.body || {};
 
     if (!email || !code) {
-      return res.status(400).json({ error: 'E-mail e código de 6 dígitos são obrigatórios.' });
+      return res.status(400).json({
+        success: false,
+        error: 'E-mail e código de 6 dígitos são obrigatórios.'
+      });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
@@ -139,7 +151,6 @@ export async function verifyCode(req, res) {
     let otpRecord = null;
     let isFromFirestore = false;
 
-    // Busca no Firestore primeiro se disponível
     if (db) {
       try {
         const docRef = db.collection('otp_codes').doc(normalizedEmail);
@@ -153,35 +164,39 @@ export async function verifyCode(req, res) {
       }
     }
 
-    // Se não encontrou no Firestore, busca no repositório local em memória
     if (!otpRecord) {
       otpRecord = otpMemoryStore.get(normalizedEmail);
     }
 
     if (!otpRecord) {
-      return res.status(400).json({ error: 'Nenhum código pendente para este e-mail. Solicite um novo código.' });
+      return res.status(400).json({
+        success: false,
+        error: 'Nenhum código pendente para este e-mail. Solicite um novo código.'
+      });
     }
 
-    // Valida expiração (5 minutos)
     if (Date.now() > otpRecord.expiresAt) {
-      // Limpa código expirado
       if (isFromFirestore && db) {
         await db.collection('otp_codes').doc(normalizedEmail).delete().catch(() => {});
       }
       otpMemoryStore.delete(normalizedEmail);
-      return res.status(400).json({ error: 'O código informado expirou. Solicite um novo código de acesso.' });
+      return res.status(400).json({
+        success: false,
+        error: 'O código informado expirou. Solicite um novo código de acesso.'
+      });
     }
 
-    // Valida limite máximo de 3 tentativas incorretas
     if (otpRecord.attempts >= 3) {
       if (isFromFirestore && db) {
         await db.collection('otp_codes').doc(normalizedEmail).delete().catch(() => {});
       }
       otpMemoryStore.delete(normalizedEmail);
-      return res.status(400).json({ error: 'Limite de 3 tentativas excedido. Solicite um novo código por segurança.' });
+      return res.status(400).json({
+        success: false,
+        error: 'Limite de 3 tentativas excedido. Solicite um novo código por segurança.'
+      });
     }
 
-    // Compara o código informado com o salvo
     if (otpRecord.code !== cleanCode) {
       const remainingAttempts = 2 - otpRecord.attempts;
       const updatedAttempts = otpRecord.attempts + 1;
@@ -194,25 +209,26 @@ export async function verifyCode(req, res) {
       }
 
       if (remainingAttempts <= 0) {
-        return res.status(400).json({ error: 'Código incorreto. Você atingiu o limite de tentativas. Solicite um novo código.' });
+        return res.status(400).json({
+          success: false,
+          error: 'Código incorreto. Você atingiu o limite de tentativas. Solicite um novo código.'
+        });
       }
 
       return res.status(400).json({
+        success: false,
         error: `Código incorreto. Você ainda tem ${remainingAttempts} tentativa(s).`
       });
     }
 
-    // CÓDIGO VÁLIDO! Proceder com a emissão do Token do Firebase
     let firebaseUser = null;
     let customToken = null;
 
     if (auth) {
       try {
-        // Tenta buscar o usuário no Firebase Auth pelo e-mail
         try {
           firebaseUser = await auth.getUserByEmail(normalizedEmail);
         } catch (getUserErr) {
-          // Se não existir, cria o usuário
           firebaseUser = await auth.createUser({
             email: normalizedEmail,
             emailVerified: true,
@@ -220,27 +236,22 @@ export async function verifyCode(req, res) {
           });
         }
 
-        // Garante que o e-mail esteja marcado como verificado
         if (!firebaseUser.emailVerified) {
           await auth.updateUser(firebaseUser.uid, { emailVerified: true });
         }
 
-        // Gera o Custom Token via Admin SDK
         customToken = await auth.createCustomToken(firebaseUser.uid);
       } catch (authErr) {
         console.error('[Firebase Admin Token Error]:', authErr);
       }
     }
 
-    // Se o SDK admin do Firebase não estiver configurado via arquivo de credenciais .env,
-    // gera um customToken demonstrativo válido para permitir fluxo sem interrupções
     if (!customToken) {
       console.log('[Auth Controller] Firebase Admin em modo offline dev. Emitindo customToken dev-mode.');
       customToken = `dev-custom-token-${Buffer.from(normalizedEmail).toString('base64')}-${Date.now()}`;
       firebaseUser = { uid: `dev-${Buffer.from(normalizedEmail).toString('hex').substring(0, 12)}`, email: normalizedEmail };
     }
 
-    // Deleta o código OTP utilizado para evitar reutilização
     if (isFromFirestore && db) {
       await db.collection('otp_codes').doc(normalizedEmail).delete().catch(() => {});
     }
@@ -259,31 +270,31 @@ export async function verifyCode(req, res) {
 
   } catch (error) {
     console.error('[Auth VerifyCode Error]:', error);
-    return res.status(500).json({ error: 'Falha interna ao verificar código de autenticação.' });
+    return res.status(500).json({
+      success: false,
+      error: 'Falha ao verificar código de autenticação.',
+      details: error.message
+    });
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NOVOS ENDPOINTS: send-otp / verify-otp
-// Esses endpoints diferem dos anteriores pois usam o uid do Firebase Client SDK
-// para marcar emailVerified: true via Admin SDK (sem Custom Token).
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Endpoint: POST /api/auth/send-otp
- * Recebe { email } — gera OTP de 6 dígitos, salva no Firestore e envia o e-mail.
  */
 export async function sendOtp(req, res) {
   try {
-    const { email } = req.body;
+    const { email } = req.body || {};
 
     if (!email || !email.includes('@')) {
-      return res.status(400).json({ error: 'Por favor, informe um endereço de e-mail válido.' });
+      return res.status(400).json({
+        success: false,
+        error: 'Por favor, informe um endereço de e-mail válido.'
+      });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
     const code = String(Math.floor(100000 + Math.random() * 900000));
-    const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutos
+    const expiresAt = Date.now() + 5 * 60 * 1000;
 
     const otpData = {
       email: normalizedEmail,
@@ -313,27 +324,31 @@ export async function sendOtp(req, res) {
     });
   } catch (error) {
     console.error('[Auth SendOtp Error]:', error);
-    return res.status(500).json({ error: 'Falha interna ao gerar código OTP.' });
+    return res.status(500).json({
+      success: false,
+      error: 'Falha ao enviar e-mail de verificação.',
+      details: error.message
+    });
   }
 }
 
 /**
  * Endpoint: POST /api/auth/verify-otp
- * Recebe { email, code, uid }.
- * Valida o código e, se correto, marca emailVerified: true no Firebase Auth via Admin SDK.
  */
 export async function verifyOtp(req, res) {
   try {
-    const { email, code, uid } = req.body;
+    const { email, code, uid } = req.body || {};
 
     if (!email || !code || !uid) {
-      return res.status(400).json({ error: 'E-mail, código de 6 dígitos e uid são obrigatórios.' });
+      return res.status(400).json({
+        success: false,
+        error: 'E-mail, código de 6 dígitos e uid são obrigatórios.'
+      });
     }
 
     const normalizedEmail = email.trim().toLowerCase();
     const cleanCode = String(code).trim();
 
-    // ── Busca o registro OTP ──────────────────────────────────────────────────
     let otpRecord = null;
     let isFromFirestore = false;
 
@@ -354,28 +369,34 @@ export async function verifyOtp(req, res) {
     }
 
     if (!otpRecord) {
-      return res.status(400).json({ error: 'Nenhum código pendente para este e-mail. Solicite um novo código.' });
+      return res.status(400).json({
+        success: false,
+        error: 'Nenhum código pendente para este e-mail. Solicite um novo código.'
+      });
     }
 
-    // ── Valida expiração ──────────────────────────────────────────────────────
     if (Date.now() > otpRecord.expiresAt) {
       if (isFromFirestore && db) {
         await db.collection('otp_codes').doc(normalizedEmail).delete().catch(() => {});
       }
       otpMemoryStore.delete(normalizedEmail);
-      return res.status(400).json({ error: 'O código informado expirou. Solicite um novo código.' });
+      return res.status(400).json({
+        success: false,
+        error: 'O código informado expirou. Solicite um novo código.'
+      });
     }
 
-    // ── Valida limite de tentativas ───────────────────────────────────────────
     if (otpRecord.attempts >= 3) {
       if (isFromFirestore && db) {
         await db.collection('otp_codes').doc(normalizedEmail).delete().catch(() => {});
       }
       otpMemoryStore.delete(normalizedEmail);
-      return res.status(400).json({ error: 'Limite de 3 tentativas excedido. Solicite um novo código por segurança.' });
+      return res.status(400).json({
+        success: false,
+        error: 'Limite de 3 tentativas excedido. Solicite um novo código por segurança.'
+      });
     }
 
-    // ── Valida o código ───────────────────────────────────────────────────────
     if (otpRecord.code !== cleanCode) {
       const updatedAttempts = otpRecord.attempts + 1;
       const remaining = 3 - updatedAttempts;
@@ -388,25 +409,28 @@ export async function verifyOtp(req, res) {
       }
 
       if (remaining <= 0) {
-        return res.status(400).json({ error: 'Código incorreto. Você atingiu o limite de tentativas. Solicite um novo código.' });
+        return res.status(400).json({
+          success: false,
+          error: 'Código incorreto. Você atingiu o limite de tentativas. Solicite um novo código.'
+        });
       }
-      return res.status(400).json({ error: `Código incorreto. Você ainda tem ${remaining} tentativa(s).` });
+      return res.status(400).json({
+        success: false,
+        error: `Código incorreto. Você ainda tem ${remaining} tentativa(s).`
+      });
     }
 
-    // ── CÓDIGO VÁLIDO: Atualiza emailVerified via Admin SDK ───────────────────
     if (auth) {
       try {
         await auth.updateUser(uid, { emailVerified: true });
         console.log(`[Auth OTP] emailVerified atualizado para true: uid=${uid}, email=${normalizedEmail}`);
       } catch (authErr) {
         console.error('[Firebase Admin updateUser Error]:', authErr.message);
-        // Em modo dev (sem credenciais), continua sem erro fatal
       }
     } else {
       console.log(`[Auth OTP DEV] Firebase Admin offline. uid=${uid} marcado como verificado (simulação).`);
     }
 
-    // Remove o código utilizado
     if (isFromFirestore && db) {
       await db.collection('otp_codes').doc(normalizedEmail).delete().catch(() => {});
     }
@@ -419,6 +443,10 @@ export async function verifyOtp(req, res) {
 
   } catch (error) {
     console.error('[Auth VerifyOtp Error]:', error);
-    return res.status(500).json({ error: 'Falha interna ao verificar código OTP.' });
+    return res.status(500).json({
+      success: false,
+      error: 'Falha ao verificar código de verificação.',
+      details: error.message
+    });
   }
 }

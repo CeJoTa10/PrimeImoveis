@@ -105,17 +105,23 @@ const startCooldown = (seconds = 60) => {
 };
 
 const getFirebaseError = (error) => {
-  switch (error.code) {
-    case 'auth/email-already-in-use': return 'Este e-mail já está cadastrado. Tente entrar na sua conta.';
-    case 'auth/invalid-credential':
-    case 'auth/wrong-password':
-    case 'auth/user-not-found': return 'E-mail ou senha incorretos.';
-    case 'auth/weak-password': return 'A senha deve conter no mínimo 6 caracteres.';
-    case 'auth/too-many-requests': return 'Muitas tentativas. Aguarde alguns instantes e tente novamente.';
-    case 'auth/invalid-email': return 'Endereço de e-mail inválido.';
-    default: return error.message || 'Ocorreu um erro. Tente novamente.';
+  if (error?.code) {
+    switch (error.code) {
+      case 'auth/email-already-in-use': return 'Este e-mail já está cadastrado. Tente entrar na sua conta.';
+      case 'auth/invalid-credential':
+      case 'auth/wrong-password':
+      case 'auth/user-not-found': return 'E-mail ou senha incorretos.';
+      case 'auth/weak-password': return 'A senha deve conter no mínimo 6 caracteres.';
+      case 'auth/too-many-requests': return 'Muitas tentativas. Aguarde alguns instantes e tente novamente.';
+      case 'auth/invalid-email': return 'Endereço de e-mail inválido.';
+    }
   }
+  if (error?.message && (error.message.includes('Unexpected token') || error.message.includes('JSON') || error.message.includes('is not valid JSON'))) {
+    return 'Servidor temporariamente indisponível. Verifique as credenciais de e-mail ou tente novamente em instantes.';
+  }
+  return error?.message || 'Ocorreu um erro. Tente novamente em instantes.';
 };
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Manipulação dos 6 Dígitos OTP

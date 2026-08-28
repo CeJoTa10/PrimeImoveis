@@ -7,16 +7,33 @@ let db = null;
 let auth = null;
 
 try {
-  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    console.log('[Firebase] Admin SDK inicializado via FIREBASE_SERVICE_ACCOUNT');
-  } else {
-    // Tenta inicializar com a configuração padrão do ambiente
-    admin.initializeApp();
-    console.log('[Firebase] Admin SDK inicializado com credenciais padrão');
+  // Garante que o Firebase Admin SDK só seja inicializado uma única vez
+  if (!admin.apps.length) {
+    if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+      let serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+      
+      // Substitui \\n por \n para garantir a integridade da private_key do Firebase em variáveis de ambiente
+      if (typeof serviceAccount === 'string') {
+        try {
+          serviceAccount = JSON.parse(serviceAccount.replace(/\\n/g, '\n'));
+        } catch (parseErr) {
+          console.error('[Firebase Admin Error] Falha ao executar JSON.parse no FIREBASE_SERVICE_ACCOUNT:', parseErr.message);
+        }
+      }
+
+      if (typeof serviceAccount === 'object' && serviceAccount !== null) {
+        admin.initializeApp({
+          credential: admin.credential.cert(serviceAccount)
+        });
+        console.log('[Firebase] Admin SDK inicializado via FIREBASE_SERVICE_ACCOUNT com sucesso.');
+      } else {
+        admin.initializeApp();
+        console.log('[Firebase] Admin SDK inicializado com credenciais padrão do ambiente.');
+      }
+    } else {
+      admin.initializeApp();
+      console.log('[Firebase] Admin SDK inicializado com credenciais padrão do ambiente.');
+    }
   }
 
   db = admin.firestore();
@@ -24,7 +41,6 @@ try {
 } catch (error) {
   console.warn('\n⚠️  [Firebase Admin Warning] Firebase Admin SDK não foi totalmente configurado.');
   console.warn('Para conectar-se ao Firestore e autenticar tokens de verdade, adicione as credenciais no .env.');
-  console.warn('Exemplo: FIREBASE_SERVICE_ACCOUNT=\'{"type": "service_account", ...}\'\n');
   console.warn('Erro original:', error.message);
 }
 

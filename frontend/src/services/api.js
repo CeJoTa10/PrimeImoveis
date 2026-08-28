@@ -5,6 +5,25 @@ const rawApiUrl = (import.meta.env.VITE_API_URL || '').trim().replace(/\/$/, '')
 export const API_BASE_URL = rawApiUrl ? (rawApiUrl.endsWith('/api') ? rawApiUrl : `${rawApiUrl}/api`) : '/api';
 
 /**
+ * Utilitário para realizar o parse seguro de respostas da API (evita SyntaxError ao receber HTML)
+ */
+async function parseJsonResponse(response, defaultErrorMsg = 'Ocorreu um erro na requisição.') {
+  const contentType = response.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    try {
+      return await response.json();
+    } catch (err) {
+      console.warn('[API Service] Falha ao converter JSON válido:', err.message);
+    }
+  }
+
+  // Se a resposta não for JSON (ex: página HTML 500 da Vercel)
+  const rawText = await response.text().catch(() => '');
+  console.warn('[API Service] Resposta não-JSON (HTML/Servidor) recebida:', response.status, rawText.substring(0, 120));
+  throw new Error('Servidor temporariamente indisponível. Verifique as credenciais de e-mail ou tente novamente em instantes.');
+}
+
+/**
  * Filtra a lista local mock quando a API estiver offline
  */
 export function filterMockImoveis(filters = {}) {
@@ -60,7 +79,7 @@ export async function fetchImoveis(filters = {}) {
     if (!response.ok) {
       throw new Error(`Status ${response.status}: Falha ao conectar na API`);
     }
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     return { data, isFallback: false };
   } catch (err) {
     console.warn('[API Service] Backend offline ou indisponível. Utilizando dados mock.', err.message);
@@ -78,7 +97,7 @@ export async function fetchImovelById(id) {
     if (!response.ok) {
       throw new Error(`Imóvel não encontrado na API (Status ${response.status})`);
     }
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     return { data, isFallback: false };
   } catch (err) {
     console.warn(`[API Service] Falha ao carregar imóvel ${id} via API. Procurando no banco local.`, err.message);
@@ -104,12 +123,11 @@ export async function createImovel(formData, token) {
       body: JSON.stringify(formData)
     });
 
+    const data = await parseJsonResponse(response);
     if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || 'Erro ao cadastrar imóvel no servidor.');
+      throw new Error(data.error || data.details || 'Erro ao cadastrar imóvel no servidor.');
     }
-
-    return await response.json();
+    return data;
   } catch (err) {
     console.error('[API Service] Erro ao cadastrar imóvel:', err);
     throw err;
@@ -127,9 +145,9 @@ export async function sendAuthCode(email) {
       body: JSON.stringify({ email })
     });
 
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     if (!response.ok) {
-      throw new Error(data.error || 'Falha ao solicitar código de acesso.');
+      throw new Error(data.error || data.details || 'Falha ao solicitar código de acesso.');
     }
     return data;
   } catch (err) {
@@ -157,9 +175,9 @@ export async function verifyAuthCode(email, code) {
       body: JSON.stringify({ email, code })
     });
 
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     if (!response.ok) {
-      throw new Error(data.error || 'Código incorreto ou expirado.');
+      throw new Error(data.error || data.details || 'Código incorreto ou expirado.');
     }
     return data;
   } catch (err) {
@@ -178,14 +196,8 @@ export async function verifyAuthCode(email, code) {
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// NOVOS HELPERS: send-otp / verify-otp
-// Esses helpers integram com o novo fluxo de emailVerified via Admin SDK.
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
  * Solicita o envio do código OTP de 6 dígitos para o e-mail informado.
- * Utilizado no cadastro (após criar conta) e no login com e-mail não verificado.
  */
 export async function sendOtp(email) {
   try {
@@ -195,9 +207,9 @@ export async function sendOtp(email) {
       body: JSON.stringify({ email })
     });
 
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     if (!response.ok) {
-      throw new Error(data.error || 'Falha ao solicitar código de verificação.');
+      throw new Error(data.error || data.details || 'Falha ao solicitar código de verificação.');
     }
     return data;
   } catch (err) {
@@ -216,7 +228,6 @@ export async function sendOtp(email) {
 
 /**
  * Valida o código OTP de 6 dígitos e atualiza emailVerified: true via Admin SDK.
- * Recebe o uid do usuário Firebase para que o backend possa chamar updateUser.
  */
 export async function verifyOtp(email, code, uid) {
   try {
@@ -226,9 +237,9 @@ export async function verifyOtp(email, code, uid) {
       body: JSON.stringify({ email, code, uid })
     });
 
-    const data = await response.json();
+    const data = await parseJsonResponse(response);
     if (!response.ok) {
-      throw new Error(data.error || 'Código incorreto ou expirado.');
+      throw new Error(data.error || data.details || 'Código incorreto ou expirado.');
     }
     return data;
   } catch (err) {
