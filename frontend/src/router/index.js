@@ -4,6 +4,7 @@ import PropertyDetailView from '../views/PropertyDetailView.vue';
 import ComprarView from '../views/ComprarView.vue';
 import AlugarView from '../views/AlugarView.vue';
 import LancamentosView from '../views/LancamentosView.vue';
+import AuthActionView from '../views/AuthActionView.vue';
 
 const routes = [
   {
@@ -31,6 +32,11 @@ const routes = [
     path: '/lancamentos',
     name: 'Lancamentos',
     component: LancamentosView
+  },
+  {
+    path: '/auth/action',
+    name: 'AuthAction',
+    component: AuthActionView
   },
   {
     path: '/:pathMatch(.*)*',

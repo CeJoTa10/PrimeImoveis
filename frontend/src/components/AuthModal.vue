@@ -1,9 +1,17 @@
 <script setup>
-import { ref, reactive, watch } from 'vue';
-import { registerWithEmail, loginWithEmail, loginWithGoogle, logout, resendVerificationEmail } from '../firebase.js';
+import { ref, reactive, watch, nextTick } from 'vue';
 import {
-  X, User, Mail, Lock, LogIn, UserPlus, Send, RefreshCw,
-  CheckCircle2, AlertCircle, Loader2, ShieldCheck
+  registerWithEmail,
+  loginWithEmail,
+  loginWithGoogle,
+  logout,
+  reloadCurrentUser
+} from '../firebase.js';
+import { sendOtp, verifyOtp } from '../services/api.js';
+import {
+  X, User, Mail, Lock, LogIn, UserPlus, RefreshCw,
+  CheckCircle2, AlertCircle, Loader2, ShieldCheck, KeyRound, Check,
+  Eye, EyeOff, ShieldAlert
 } from 'lucide-vue-next';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -15,56 +23,145 @@ const props = defineProps({
 const emit = defineEmits(['close']);
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Estado do Modal
+// Estados do Modal
 // mode: 'login' | 'register' | 'verify'
-//   verify = tela de aviso pós-cadastro (link de verificação enviado)
 // ─────────────────────────────────────────────────────────────────────────────
 const mode = ref('login');
 const isLoading = ref(false);
+const isVerifyingCode = ref(false);
 const errorMessage = ref('');
 const successMessage = ref('');
 const resendInProgress = ref(false);
+const resendCooldown = ref(0);
+let cooldownTimer = null;
 
-const formData = reactive({ name: '', email: '', password: '' });
+// Visibilidade das Senhas
+const showLoginPassword = ref(false);
+const showRegisterPassword = ref(false);
+const showRegisterConfirmPassword = ref(false);
 
-// Reset ao fechar
+// Dados do Formulário
+const formData = reactive({
+  name: '',
+  email: '',
+  password: '',
+  confirmPassword: ''
+});
+
+// Guardar UID do usuário em processo de verificação
+const pendingUid = ref('');
+
+// 6 Dígitos OTP
+const otpDigits = ref(['', '', '', '', '', '']);
+const digitInputs = ref([]);
+
+// Reset ao abrir/fechar
 watch(() => props.isOpen, (open) => {
   if (!open) {
     mode.value = 'login';
     isLoading.value = false;
+    isVerifyingCode.value = false;
     errorMessage.value = '';
     successMessage.value = '';
     resendInProgress.value = false;
+    pendingUid.value = '';
+    showLoginPassword.value = false;
+    showRegisterPassword.value = false;
+    showRegisterConfirmPassword.value = false;
     formData.name = '';
     formData.email = '';
     formData.password = '';
+    formData.confirmPassword = '';
+    otpDigits.value = ['', '', '', '', '', ''];
+    if (cooldownTimer) clearInterval(cooldownTimer);
+    resendCooldown.value = 0;
   }
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Helpers e Transições
 // ─────────────────────────────────────────────────────────────────────────────
 const switchMode = (newMode) => {
   mode.value = newMode;
   errorMessage.value = '';
   successMessage.value = '';
+  if (newMode === 'verify') {
+    nextTick(() => {
+      digitInputs.value[0]?.focus();
+    });
+  }
+};
+
+const startCooldown = (seconds = 60) => {
+  resendCooldown.value = seconds;
+  if (cooldownTimer) clearInterval(cooldownTimer);
+  cooldownTimer = setInterval(() => {
+    if (resendCooldown.value > 0) {
+      resendCooldown.value--;
+    } else {
+      clearInterval(cooldownTimer);
+    }
+  }, 1000);
 };
 
 const getFirebaseError = (error) => {
   switch (error.code) {
-    case 'auth/email-already-in-use': return 'Este e-mail já está cadastrado.';
+    case 'auth/email-already-in-use': return 'Este e-mail já está cadastrado. Tente entrar na sua conta.';
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
     case 'auth/user-not-found': return 'E-mail ou senha incorretos.';
     case 'auth/weak-password': return 'A senha deve conter no mínimo 6 caracteres.';
-    case 'auth/too-many-requests': return 'Muitas tentativas. Aguarde um momento e tente novamente.';
+    case 'auth/too-many-requests': return 'Muitas tentativas. Aguarde alguns instantes e tente novamente.';
     case 'auth/invalid-email': return 'Endereço de e-mail inválido.';
     default: return error.message || 'Ocorreu um erro. Tente novamente.';
   }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Lógica de Cadastro
+// Manipulação dos 6 Dígitos OTP
+// ─────────────────────────────────────────────────────────────────────────────
+const handleDigitInput = (index, event) => {
+  const value = event.target.value.replace(/\D/g, '');
+  otpDigits.value[index] = value ? value.slice(-1) : '';
+
+  if (value && index < 5) {
+    nextTick(() => {
+      digitInputs.value[index + 1]?.focus();
+    });
+  }
+
+  // Auto-submete quando os 6 dígitos estiverem preenchidos
+  if (otpDigits.value.every(d => d !== '') && otpDigits.value.join('').length === 6) {
+    handleVerifyOtp();
+  }
+};
+
+const handleDigitKeyDown = (index, event) => {
+  if (event.key === 'Backspace' && !otpDigits.value[index] && index > 0) {
+    digitInputs.value[index - 1]?.focus();
+  }
+};
+
+const handleDigitPaste = (event) => {
+  event.preventDefault();
+  const pasted = (event.clipboardData || window.clipboardData).getData('text');
+  const numbers = pasted.replace(/\D/g, '').slice(0, 6);
+
+  if (numbers) {
+    numbers.split('').forEach((char, idx) => {
+      if (idx < 6) otpDigits.value[idx] = char;
+    });
+    const nextIdx = Math.min(numbers.length, 5);
+    digitInputs.value[nextIdx]?.focus();
+
+    if (numbers.length === 6) {
+      handleVerifyOtp();
+    }
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lógica de Cadastro (Registro)
 // ─────────────────────────────────────────────────────────────────────────────
 const handleRegister = async () => {
   if (!formData.name.trim()) {
@@ -75,20 +172,102 @@ const handleRegister = async () => {
     errorMessage.value = 'A senha deve conter no mínimo 6 caracteres.';
     return;
   }
+  if (formData.password !== formData.confirmPassword) {
+    errorMessage.value = 'As senhas digitadas não coincidem. Verifique e tente novamente.';
+    return;
+  }
 
   isLoading.value = true;
   errorMessage.value = '';
+  successMessage.value = '';
 
   try {
-    // Cria a conta, dispara sendEmailVerification e faz signOut — tudo em firebase.js
-    await registerWithEmail(formData.email, formData.password, formData.name);
-    // Vai para a tela de aviso de verificação
+    // 1. Cria a conta no Firebase Client SDK
+    const userCredential = await registerWithEmail(formData.email, formData.password, formData.name);
+    pendingUid.value = userCredential.user.uid;
+
+    // 2. Dispara o envio do código OTP de 6 dígitos via Backend
+    await sendOtp(formData.email);
+    startCooldown(60);
+
+    // 3. Redireciona para a tela de 6 dígitos
     mode.value = 'verify';
+    otpDigits.value = ['', '', '', '', '', ''];
+    nextTick(() => {
+      digitInputs.value[0]?.focus();
+    });
   } catch (err) {
     console.error('[AuthModal Register]:', err);
     errorMessage.value = getFirebaseError(err);
   } finally {
     isLoading.value = false;
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Validação do Código de 6 Dígitos (OTP)
+// ─────────────────────────────────────────────────────────────────────────────
+const handleVerifyOtp = async () => {
+  const code = otpDigits.value.join('').trim();
+  if (code.length !== 6) {
+    errorMessage.value = 'Digite todos os 6 dígitos do código de verificação.';
+    return;
+  }
+
+  isVerifyingCode.value = true;
+  errorMessage.value = '';
+  successMessage.value = '';
+
+  try {
+    // 1. Valida o código no backend e marca emailVerified: true via Admin SDK
+    await verifyOtp(formData.email, code, pendingUid.value);
+
+    // 2. Recarrega o usuário atual para atualizar a sessão
+    await reloadCurrentUser();
+
+    successMessage.value = '🎉 E-mail confirmado com sucesso! Acesso liberado.';
+
+    setTimeout(() => {
+      emit('close');
+    }, 1500);
+  } catch (err) {
+    console.error('[AuthModal VerifyOtp]:', err);
+    errorMessage.value = err.message || 'Código incorreto ou expirado. Tente novamente.';
+    nextTick(() => {
+      digitInputs.value[0]?.focus();
+    });
+  } finally {
+    isVerifyingCode.value = false;
+  }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reenvio do Código de 6 Dígitos
+// ─────────────────────────────────────────────────────────────────────────────
+const handleResendOtp = async () => {
+  if (!formData.email) {
+    errorMessage.value = 'E-mail não identificado para reenvio.';
+    return;
+  }
+  if (resendCooldown.value > 0) return;
+
+  resendInProgress.value = true;
+  errorMessage.value = '';
+  successMessage.value = '';
+
+  try {
+    await sendOtp(formData.email);
+    startCooldown(60);
+    otpDigits.value = ['', '', '', '', '', ''];
+    successMessage.value = 'Novo código de 6 dígitos enviado! Verifique sua caixa de entrada.';
+    nextTick(() => {
+      digitInputs.value[0]?.focus();
+    });
+  } catch (err) {
+    console.error('[AuthModal ResendOtp]:', err);
+    errorMessage.value = err.message || 'Não foi possível reenviar o código. Aguarde alguns instantes.';
+  } finally {
+    resendInProgress.value = false;
   }
 };
 
@@ -107,43 +286,22 @@ const handleLogin = async () => {
       // ✅ E-mail verificado: acesso liberado
       emit('close');
     } else {
-      // 🛑 E-mail não verificado: bloqueia acesso
-      await logout();
-      errorMessage.value = 'Seu e-mail ainda não foi verificado. Acesse sua caixa de entrada (ou pasta de Spam) para ativar sua conta antes de entrar.';
+      // 🛑 E-mail pendente de verificação: dispara OTP de 6 dígitos e abre tela de verificação
+      pendingUid.value = user.uid;
+      await sendOtp(formData.email);
+      startCooldown(60);
+      mode.value = 'verify';
+      otpDigits.value = ['', '', '', '', '', ''];
+      errorMessage.value = 'Sua conta ainda não foi ativada. Enviamos um código de 6 dígitos para o seu e-mail.';
+      nextTick(() => {
+        digitInputs.value[0]?.focus();
+      });
     }
   } catch (err) {
     console.error('[AuthModal Login]:', err);
     errorMessage.value = getFirebaseError(err);
   } finally {
     isLoading.value = false;
-  }
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Reenvio do Link de Verificação
-// ─────────────────────────────────────────────────────────────────────────────
-const handleResendVerification = async () => {
-  if (!formData.email || !formData.password) {
-    errorMessage.value = 'Para reenviar o link, confirme seu e-mail e senha no formulário.';
-    return;
-  }
-
-  resendInProgress.value = true;
-  errorMessage.value = '';
-  successMessage.value = '';
-
-  try {
-    await resendVerificationEmail(formData.email, formData.password);
-    successMessage.value = 'Novo link de verificação enviado! Confira sua caixa de entrada e pasta de Spam.';
-  } catch (err) {
-    console.error('[AuthModal Resend]:', err);
-    if (err.code === 'auth/too-many-requests') {
-      errorMessage.value = 'Aguarde alguns minutos antes de solicitar um novo e-mail de verificação.';
-    } else {
-      errorMessage.value = 'Não foi possível reenviar. Verifique suas credenciais e tente novamente.';
-    }
-  } finally {
-    resendInProgress.value = false;
   }
 };
 
@@ -187,53 +345,82 @@ const handleGoogleAuth = async () => {
       </button>
 
       <!-- ══════════════════════════════════════════════════════════════════ -->
-      <!-- MODO: VERIFY — Aviso de confirmação de e-mail                     -->
+      <!-- MODO: VERIFY — Validação com Código de 6 Dígitos (OTP)            -->
       <!-- ══════════════════════════════════════════════════════════════════ -->
       <div v-if="mode === 'verify'" class="text-center space-y-5 py-2">
         
         <div class="w-16 h-16 bg-brand-50/90 text-brand-600 rounded-2xl flex items-center justify-center mx-auto border border-brand-200/60 shadow-inner">
-          <Send class="w-8 h-8" />
+          <KeyRound class="w-8 h-8" />
         </div>
         
         <div>
-          <h2 class="text-2xl font-black text-slate-800 tracking-tight">Confirme seu E-mail</h2>
+          <h2 class="text-2xl font-black text-slate-800 tracking-tight">Digite o Código</h2>
           <p class="text-xs text-slate-500 mt-2 leading-relaxed max-w-xs mx-auto">
-            Enviamos um link de confirmação para
+            Enviamos um código de <strong>6 dígitos</strong> para
             <strong class="text-slate-800 block text-sm font-bold mt-1 break-all">{{ formData.email }}</strong>
-          </p>
-          <p class="text-xs text-slate-400 mt-3 leading-relaxed max-w-xs mx-auto">
-            Clique no link do e-mail para ativar sua conta. Você só poderá fazer login após a confirmação.
           </p>
         </div>
 
-        <!-- Alerta de Sucesso (reenvio) -->
+        <!-- Alerta de Sucesso -->
         <div v-if="successMessage" class="p-3.5 bg-emerald-50/90 border border-emerald-200 rounded-2xl text-emerald-700 text-xs font-semibold flex items-center gap-2 text-left">
           <CheckCircle2 class="w-4 h-4 text-emerald-500 shrink-0" />
           <span>{{ successMessage }}</span>
         </div>
 
-        <!-- Alerta de Erro (reenvio) -->
+        <!-- Alerta de Erro -->
         <div v-if="errorMessage" class="p-3.5 bg-red-50/90 border border-red-200 rounded-2xl text-red-700 text-xs font-semibold flex items-center gap-2 text-left">
           <AlertCircle class="w-4 h-4 text-red-500 shrink-0" />
           <span>{{ errorMessage }}</span>
         </div>
 
-        <div class="space-y-3 pt-1">
+        <!-- 6 Inputs Numéricos para Código OTP -->
+        <div class="space-y-3">
+          <div class="flex justify-center gap-2 sm:gap-2.5" @paste="handleDigitPaste">
+            <input
+              v-for="(digit, idx) in otpDigits"
+              :key="idx"
+              ref="digitInputs"
+              v-model="otpDigits[idx]"
+              type="text"
+              inputmode="numeric"
+              maxlength="1"
+              autocomplete="one-time-code"
+              class="w-11 h-14 sm:w-12 sm:h-14 text-center text-xl font-black text-slate-800 bg-white/90 border border-slate-200/90 rounded-2xl shadow-sm focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 focus:outline-none transition"
+              @input="handleDigitInput(idx, $event)"
+              @keydown="handleDigitKeyDown(idx, $event)"
+            />
+          </div>
+          <p class="text-[11px] text-slate-400">O código expira em 5 minutos.</p>
+        </div>
+
+        <!-- Botão de Confirmação -->
+        <div class="space-y-3 pt-2">
           <button 
-            @click="switchMode('login')"
-            class="w-full py-3 px-4 liquid-glass-button text-white font-bold text-sm rounded-xl transition flex items-center justify-center gap-2"
+            @click="handleVerifyOtp"
+            :disabled="isVerifyingCode || otpDigits.some(d => d === '')"
+            class="w-full py-3.5 px-4 liquid-glass-button text-white font-bold text-sm rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-50"
           >
-            <LogIn class="w-4 h-4" />
-            <span>Já confirmei — Fazer Login</span>
+            <Loader2 v-if="isVerifyingCode" class="w-4 h-4 animate-spin" />
+            <Check v-else class="w-4 h-4" />
+            <span>{{ isVerifyingCode ? 'Validando Código...' : 'Confirmar e Ativar Conta' }}</span>
           </button>
 
+          <!-- Reenvio de Código com Contador -->
           <button
-            @click="handleResendVerification"
-            :disabled="resendInProgress"
+            @click="handleResendOtp"
+            :disabled="resendInProgress || resendCooldown > 0"
             class="w-full py-2.5 px-4 bg-white/70 hover:bg-white text-slate-600 font-semibold text-xs rounded-xl flex items-center justify-center gap-2 border border-slate-200/80 shadow-sm transition disabled:opacity-50"
           >
             <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': resendInProgress }" />
-            <span>{{ resendInProgress ? 'Reenviando...' : 'Reenviar Link de Verificação' }}</span>
+            <span v-if="resendCooldown > 0">Reenviar código em {{ resendCooldown }}s</span>
+            <span v-else>{{ resendInProgress ? 'Enviando...' : 'Reenviar Código de 6 Dígitos' }}</span>
+          </button>
+
+          <button
+            @click="switchMode('login')"
+            class="text-xs text-slate-400 hover:text-slate-600 transition block mx-auto pt-1"
+          >
+            Voltar para tela de login
           </button>
         </div>
       </div>
@@ -262,22 +449,9 @@ const handleGoogleAuth = async () => {
         </div>
 
         <!-- Alerta de Erro -->
-        <div v-if="errorMessage" class="p-3.5 bg-red-50/90 backdrop-blur-sm border border-red-200 rounded-2xl text-red-700 text-xs font-semibold space-y-2.5">
-          <div class="flex items-center gap-2">
-            <AlertCircle class="w-4 h-4 text-red-500 shrink-0" />
-            <span>{{ errorMessage }}</span>
-          </div>
-
-          <!-- Reenviar link diretamente da tela de login -->
-          <button
-            v-if="mode === 'login' && errorMessage.includes('verificado')"
-            @click="handleResendVerification"
-            :disabled="resendInProgress"
-            class="text-xs font-extrabold text-brand-700 flex items-center gap-1.5 bg-white/80 px-3 py-1.5 rounded-lg border border-brand-200/80 shadow-sm transition hover:bg-brand-50 disabled:opacity-50"
-          >
-            <RefreshCw class="w-3.5 h-3.5" :class="{ 'animate-spin': resendInProgress }" />
-            <span>Reenviar Link de Verificação</span>
-          </button>
+        <div v-if="errorMessage" class="p-3.5 bg-red-50/90 backdrop-blur-sm border border-red-200 rounded-2xl text-red-700 text-xs font-semibold flex items-center gap-2">
+          <AlertCircle class="w-4 h-4 text-red-500 shrink-0" />
+          <span>{{ errorMessage }}</span>
         </div>
 
         <!-- Alerta de Sucesso -->
@@ -287,7 +461,7 @@ const handleGoogleAuth = async () => {
         </div>
 
         <!-- Formulário -->
-        <form @submit.prevent="mode === 'login' ? handleLogin() : handleRegister()" class="space-y-4">
+        <form @submit.prevent="mode === 'login' ? handleLogin() : handleRegister()" class="space-y-3.5">
 
           <!-- Nome (somente Cadastro) -->
           <div v-if="mode === 'register'">
@@ -321,37 +495,82 @@ const handleGoogleAuth = async () => {
             </div>
           </div>
 
-          <!-- Senha -->
+          <!-- Senha (com botão de visualizar) -->
           <div>
-            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1 block">Senha *</label>
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1 block">
+              {{ mode === 'register' ? 'Criar Senha *' : 'Senha *' }}
+            </label>
             <div class="relative">
               <Lock class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
               <input
                 v-model="formData.password"
-                type="password"
+                :type="mode === 'login' ? (showLoginPassword ? 'text' : 'password') : (showRegisterPassword ? 'text' : 'password')"
                 required
                 autocomplete="current-password"
                 placeholder="No mínimo 6 caracteres"
-                class="w-full pl-10 pr-3 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none"
+                class="w-full pl-10 pr-10 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none"
               />
+              <!-- Botão Visualizar Senha -->
+              <button
+                type="button"
+                @click="mode === 'login' ? (showLoginPassword = !showLoginPassword) : (showRegisterPassword = !showRegisterPassword)"
+                class="absolute right-3 top-2.5 p-1 text-slate-400 hover:text-slate-600 transition"
+                tabindex="-1"
+                title="Mostrar/Ocultar senha"
+              >
+                <EyeOff v-if="mode === 'login' ? showLoginPassword : showRegisterPassword" class="w-4 h-4" />
+                <Eye v-else class="w-4 h-4" />
+              </button>
             </div>
+          </div>
+
+          <!-- Repetir Senha (somente Cadastro com botão de visualizar) -->
+          <div v-if="mode === 'register'">
+            <label class="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 pl-1 block">Confirmar Senha *</label>
+            <div class="relative">
+              <Lock class="absolute left-3.5 top-3 w-4 h-4 text-slate-400" />
+              <input
+                v-model="formData.confirmPassword"
+                :type="showRegisterConfirmPassword ? 'text' : 'password'"
+                required
+                autocomplete="new-password"
+                placeholder="Repita sua senha"
+                class="w-full pl-10 pr-10 py-2.5 text-sm liquid-glass-input rounded-xl focus:outline-none"
+              />
+              <!-- Botão Visualizar Confirmação de Senha -->
+              <button
+                type="button"
+                @click="showRegisterConfirmPassword = !showRegisterConfirmPassword"
+                class="absolute right-3 top-2.5 p-1 text-slate-400 hover:text-slate-600 transition"
+                tabindex="-1"
+                title="Mostrar/Ocultar senha"
+              >
+                <EyeOff v-if="showRegisterConfirmPassword" class="w-4 h-4" />
+                <Eye v-else class="w-4 h-4" />
+              </button>
+            </div>
+            <!-- Feedback de correspondência de senha -->
+            <p v-if="formData.confirmPassword && formData.password !== formData.confirmPassword" class="text-[10px] text-red-500 font-semibold mt-1 pl-1 flex items-center gap-1">
+              <ShieldAlert class="w-3 h-3" />
+              As senhas não coincidem.
+            </p>
           </div>
 
           <!-- Botão Submit -->
           <button
             type="submit"
-            :disabled="isLoading"
-            class="w-full py-3 px-4 liquid-glass-button text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50"
+            :disabled="isLoading || (mode === 'register' && formData.confirmPassword && formData.password !== formData.confirmPassword)"
+            class="w-full py-3 px-4 liquid-glass-button text-white font-bold text-sm rounded-xl flex items-center justify-center gap-2 transition disabled:opacity-50 mt-2"
           >
             <Loader2 v-if="isLoading" class="w-4 h-4 animate-spin" />
             <LogIn v-else-if="mode === 'login'" class="w-4 h-4" />
             <UserPlus v-else class="w-4 h-4" />
-            <span>{{ isLoading ? 'Aguarde...' : mode === 'login' ? 'Entrar na Conta' : 'Criar Conta' }}</span>
+            <span>{{ isLoading ? 'Aguarde...' : mode === 'login' ? 'Entrar na Conta' : 'Criar Conta & Receber Código' }}</span>
           </button>
         </form>
 
         <!-- Divisor -->
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-3 pt-1">
           <span class="h-px bg-slate-200/60 flex-1"></span>
           <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider whitespace-nowrap">Ou continue com</span>
           <span class="h-px bg-slate-200/60 flex-1"></span>
